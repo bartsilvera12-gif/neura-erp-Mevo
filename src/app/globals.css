@@ -53,3 +53,11 @@ body {
   font-family: var(--font-plus-jakarta), system-ui, sans-serif;
 }
 
+/* Sidebar: gris neutro forzado - sin azul */
+[data-sidebar] {
+  background-color: #18181b !important;
+}
+.dark [data-sidebar] {
+  background-color: #09090b !important;
+}
+

@@ -226,27 +226,27 @@ export default function Sidebar() {
 
   return (
     <motion.aside
+      data-sidebar
       initial={false}
-      animate={{ width: collapsed ? 72 : 256 }}
+      animate={{ width: collapsed ? 80 : 260 }}
       transition={{ duration: 0.2 }}
       className="flex shrink-0 flex-col border-r border-white/5"
-      style={{ backgroundColor: "var(--sidebar)" }}
     >
-      {/* Logo SVG sin fondo - integrado en sidebar oscuro */}
-      <div className="flex h-20 items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-        <Link href="/" className={`flex items-center min-w-0 ${collapsed ? "flex-1 justify-center" : "gap-3"}`}>
-          <div className="relative shrink-0 flex items-center" style={{ height: 40, width: collapsed ? 40 : 72 }}>
+      {/* Logo mucho más grande y visible */}
+      <div className="flex h-24 items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+        <Link href="/" className={`flex items-center min-w-0 ${collapsed ? "flex-1 justify-center" : "gap-4"}`}>
+          <div className="relative shrink-0 flex items-center" style={{ height: 56, width: collapsed ? 56 : 120 }}>
             <Image
               src="/neura-logo.svg"
               alt="Neura"
-              width={72}
-              height={40}
-              className="h-10 w-auto max-w-full object-contain object-left"
+              width={120}
+              height={56}
+              className="h-14 w-auto max-w-full object-contain object-left"
               priority
             />
           </div>
           {!collapsed && (
-            <span className="text-base font-extrabold tracking-tight text-white whitespace-nowrap">NEURA ERP</span>
+            <span className="text-xl font-black tracking-tight text-white whitespace-nowrap">NEURA ERP</span>
           )}
         </Link>
         <button
