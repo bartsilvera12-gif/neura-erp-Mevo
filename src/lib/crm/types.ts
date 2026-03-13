@@ -6,13 +6,13 @@ export type EtapaFunnel =
   | "PERDIDO";
 
 export interface Nota {
-  id:     number;
+  id:     string;
   texto:  string;
   fecha:  string; // ISO string
 }
 
 export interface Prospecto {
-  id:                    number;
+  id:                    string;
   numero_control:        string;       // CRM-000001, CRM-000002, …
   empresa:               string;
   contacto:              string;

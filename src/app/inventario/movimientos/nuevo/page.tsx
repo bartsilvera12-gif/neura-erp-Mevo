@@ -18,15 +18,19 @@ export default function NuevoMovimientoPage() {
   });
 
   useEffect(() => {
-    setProductos(getProductos());
+    let cancelled = false;
+    getProductos().then((data) => {
+      if (!cancelled) setProductos(data);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   function handleProductoChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const id = parseInt(e.target.value);
+    const id = e.target.value;
     const producto = productos.find((p) => p.id === id);
     setForm((prev) => ({
       ...prev,
-      producto_id: e.target.value,
+      producto_id: id,
       costo_unitario: producto ? String(producto.costo_promedio) : "",
     }));
   }
@@ -44,12 +48,10 @@ export default function NuevoMovimientoPage() {
     setForm((prev) => ({ ...prev, tipo, origen: origenSugerido }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    const productoSeleccionado = productos.find(
-      (p) => p.id === parseInt(form.producto_id)
-    );
+    const productoSeleccionado = productos.find((p) => p.id === form.producto_id);
     if (!productoSeleccionado) return;
 
     const cantidadNum =
@@ -57,7 +59,7 @@ export default function NuevoMovimientoPage() {
         ? parseFloat(form.cantidad)
         : Math.abs(parseFloat(form.cantidad));
 
-    saveMovimiento({
+    const guardado = await saveMovimiento({
       producto_id: productoSeleccionado.id,
       producto_nombre: productoSeleccionado.nombre,
       producto_sku: productoSeleccionado.sku,
@@ -65,15 +67,13 @@ export default function NuevoMovimientoPage() {
       cantidad: cantidadNum,
       costo_unitario: parseFloat(form.costo_unitario) || 0,
       origen: form.origen,
-      fecha: new Date().toISOString(), // fecha automática al momento de guardar
+      fecha: new Date().toISOString(),
     });
 
-    router.push("/inventario/movimientos");
+    if (guardado) router.push("/inventario/movimientos");
   }
 
-  const productoSeleccionado = productos.find(
-    (p) => p.id === parseInt(form.producto_id)
-  );
+  const productoSeleccionado = productos.find((p) => p.id === form.producto_id);
 
   const inputClass =
     "w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-gray-500 transition-colors text-sm";
@@ -102,7 +102,7 @@ export default function NuevoMovimientoPage() {
             >
               <option value="">Seleccionar producto...</option>
               {productos.map((p) => (
-                <option key={p.id} value={p.id}>
+                <option key={p.id} value={String(p.id)}>
                   {p.nombre} — {p.sku} (stock actual: {p.stock_actual})
                 </option>
               ))}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getProductos } from "@/lib/inventario/storage";
 import type { Producto, MetodoValuacion } from "@/lib/inventario/types";
 
@@ -40,7 +41,11 @@ export default function InventarioPage() {
   const [soloStockBajo,    setSoloStockBajo]    = useState(false);
 
   useEffect(() => {
-    setTodos(getProductos());
+    let cancelled = false;
+    getProductos().then((data) => {
+      if (!cancelled) setTodos(data);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const productos = todos.filter((p) => {
@@ -105,7 +110,15 @@ export default function InventarioPage() {
       <div className="bg-white rounded-xl shadow p-6">
 
         <div className="flex justify-between items-center mb-5">
-          <h2 className="text-xl font-semibold">Productos</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-semibold">Productos</h2>
+            <Link
+              href="/inventario/nuevo"
+              className="text-sm text-gray-600 hover:text-gray-900 underline"
+            >
+              Nuevo producto
+            </Link>
+          </div>
           <p className="text-xs text-gray-400">
             Los productos ingresan desde <span className="font-medium text-gray-500">Compras</span>
           </p>
@@ -213,6 +226,7 @@ export default function InventarioPage() {
                 <th className="py-3 font-medium text-right">
                   <span title="(precio - costo) / precio × 100">Margen s/venta</span>
                 </th>
+                <th className="py-3 font-medium w-20"></th>
               </tr>
             </thead>
 
@@ -240,6 +254,14 @@ export default function InventarioPage() {
                     </td>
                     <td className={`py-4 text-right tabular-nums font-semibold ${margenColor(margen)}`}>
                       {margen.toFixed(2)}%
+                    </td>
+                    <td className="py-4">
+                      <Link
+                        href={`/inventario/${p.id}/editar`}
+                        className="text-sm text-gray-500 hover:text-gray-800 underline"
+                      >
+                        Editar
+                      </Link>
                     </td>
                   </tr>
                 );

@@ -46,7 +46,7 @@ export default function EditProspectoPage() {
   const params = useParams();
   const router = useRouter();
   if (!params) return null;
-  const id     = parseInt(params.id as string);
+  const id = params.id as string;
 
   const [prospecto, setProspecto] = useState<Prospecto | null>(null);
   const [notFound,  setNotFound]  = useState(false);
@@ -71,8 +71,8 @@ export default function EditProspectoPage() {
   const [errorForm,         setErrorForm]         = useState<string | null>(null);
   const [confirmarEliminar, setConfirmarEliminar] = useState(false);
 
-  function cargar() {
-    const p = getProspecto(id);
+  async function cargar() {
+    const p = await getProspecto(id);
     if (!p) { setNotFound(true); return; }
     setProspecto(p);
     setForm({
@@ -89,7 +89,10 @@ export default function EditProspectoPage() {
     });
   }
 
-  useEffect(() => { if (!isNaN(id)) cargar(); else setNotFound(true); }, [id]);
+  useEffect(() => {
+    if (id) cargar();
+    else setNotFound(true);
+  }, [id]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -105,13 +108,13 @@ export default function EditProspectoPage() {
     }));
   }
 
-  function handleGuardar(e: React.FormEvent) {
+  async function handleGuardar(e: React.FormEvent) {
     e.preventDefault();
     setErrorForm(null);
     if (!form.empresa.trim())  return setErrorForm("La empresa es obligatoria.");
     if (!form.contacto.trim()) return setErrorForm("El contacto es obligatorio.");
 
-    updateProspecto(id, {
+    const actualizado = await updateProspecto(id, {
       empresa:              form.empresa.trim().toUpperCase(),
       contacto:             form.contacto.trim().toUpperCase(),
       email:                form.email.trim()    || undefined,
@@ -124,27 +127,27 @@ export default function EditProspectoPage() {
       responsable:          form.responsable.trim().toUpperCase() || undefined,
     });
 
-    router.push("/crm");
+    if (actualizado) router.push("/crm");
   }
 
-  function handleCambiarEtapa(etapa: EtapaFunnel) {
-    moveProspecto(id, etapa);
+  async function handleCambiarEtapa(etapa: EtapaFunnel) {
+    await moveProspecto(id, etapa);
     cargar();
   }
 
-  function handleAgregarNota(e: React.FormEvent) {
+  async function handleAgregarNota(e: React.FormEvent) {
     e.preventDefault();
     if (!nuevaNota.trim()) return;
     setGuardandoNota(true);
-    addNota(id, nuevaNota);
+    await addNota(id, nuevaNota);
     setNuevaNota("");
     cargar();
     setGuardandoNota(false);
     setTimeout(() => notaInputRef.current?.focus(), 0);
   }
 
-  function handleEliminar() {
-    deleteProspecto(id);
+  async function handleEliminar() {
+    await deleteProspecto(id);
     router.push("/crm");
   }
 

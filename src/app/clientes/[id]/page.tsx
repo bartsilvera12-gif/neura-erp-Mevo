@@ -118,8 +118,7 @@ export default function ClienteDetailPage() {
   async function cargar() {
     const c = await getCliente(id);
     if (!c) { setNotFound(true); return; }
-    // Adjuntar notas desde localStorage
-    c.notas = getNotasCliente(id);
+    c.notas = await getNotasCliente(id);
     setCliente(c);
     setForm({
       tipo_cliente:        c.tipo_cliente,
@@ -206,13 +205,13 @@ export default function ClienteDetailPage() {
     router.push("/clientes");
   }
 
-  function handleAgregarNota(e: React.FormEvent) {
+  async function handleAgregarNota(e: React.FormEvent) {
     e.preventDefault();
     if (!nuevaNota.trim()) return;
     setGuardandoNota(true);
-    addNotaCliente(id, nuevaNota);
+    await addNotaCliente(id, nuevaNota);
     setNuevaNota("");
-    cargar();
+    await cargar();
     setGuardandoNota(false);
     setTimeout(() => notaRef.current?.focus(), 0);
   }

@@ -3,6 +3,7 @@ import { createBrowserClient } from "@supabase/ssr";
 export interface Empresa {
   id: string;
   nombre_empresa: string;
+  plan: string | null;
   ruc: string | null;
   estado: string;
   created_at: string;
@@ -84,6 +85,7 @@ export async function getModulos(): Promise<Modulo[]> {
 
 export interface CrearEmpresaData {
   nombre_empresa: string;
+  plan?: string;
   ruc: string;
   estado: string;
   email: string;

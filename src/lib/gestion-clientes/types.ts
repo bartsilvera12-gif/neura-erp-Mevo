@@ -9,8 +9,8 @@ export type TipoGestion =
 export type ResultadoTipificacion = "Pendiente" | "Resuelto" | "Escalar";
 
 export interface Tipificacion {
-  id:           number;
-  cliente_id:   number;
+  id:           string;
+  cliente_id:   string;
   fecha:        string;               // ISO string
   usuario:      string;
   tipo_gestion: TipoGestion;
@@ -21,8 +21,8 @@ export interface Tipificacion {
 export type EstadoFactura = "Pagado" | "Pendiente" | "Vencido" | "Anulado";
 
 export interface Factura {
-  id:                number;
-  cliente_id:        number;
+  id:                string;
+  cliente_id:        string;
   numero_factura:    string;
   fecha:             string;          // YYYY-MM-DD
   fecha_vencimiento: string;          // YYYY-MM-DD

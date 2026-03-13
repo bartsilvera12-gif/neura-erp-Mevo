@@ -3,7 +3,7 @@ export type MonedaPlan    = "GS" | "USD";
 export type EstadoPlan    = "activo" | "inactivo";
 
 export interface Plan {
-  id:               number;
+  id:               string;
   codigo_plan:      string;          // PLAN-0001
 
   nombre:           string;

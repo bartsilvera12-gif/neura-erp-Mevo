@@ -119,11 +119,12 @@ export default function NuevaCompraPage() {
   // ── Carga inicial ────────────────────────────────────────────────────────
 
   function recargarProveedores() {
-    setProveedores(getProveedores().filter((p) => p.estado === "activo"));
+    const data = getProveedores();
+    setProveedores(data.filter((p) => p.estado === "activo"));
   }
 
   function recargarProductos() {
-    setProductos(getProductos());
+    getProductos().then(setProductos);
   }
 
   useEffect(() => {
@@ -156,7 +157,7 @@ export default function NuevaCompraPage() {
       : null;
 
   const calculosListos = subtotal > 0 && precioVentaNum > 0;
-  const productoSeleccionado = productos.find((p) => p.id === parseInt(form.producto_id));
+  const productoSeleccionado = productos.find((p) => p.id === form.producto_id);
 
   // Margen preview dentro del formulario de nuevo producto
   const costoParaPreview = costoUnitarioPYG > 0 ? costoUnitarioPYG : 0;
@@ -175,7 +176,7 @@ export default function NuevaCompraPage() {
   }
 
   function handleProductoSelectChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const id = parseInt(e.target.value);
+    const id = e.target.value;
     const p = productos.find((x) => x.id === id);
     setProductoCreado(null);
     setForm((prev) => ({
@@ -186,17 +187,18 @@ export default function NuevaCompraPage() {
     }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (subtotal === 0 || precioVentaNum === 0) return;
 
     const todosProveedores = getProveedores();
-    const proveedor = todosProveedores.find((p) => p.id === parseInt(form.proveedor_id));
-    const producto = getProductos().find((p) => p.id === parseInt(form.producto_id));
+    const todosProductos = await getProductos();
+    const proveedor = todosProveedores.find((p) => String(p.id) === form.proveedor_id);
+    const producto = todosProductos.find((p) => p.id === form.producto_id);
     if (!proveedor || !producto) return;
 
-    saveCompra({
-      proveedor_id: proveedor.id,
+    await saveCompra({
+      proveedor_id: String(proveedor.id),
       proveedor_nombre: proveedor.nombre,
       producto_id: producto.id,
       producto_nombre: producto.nombre,
@@ -268,11 +270,11 @@ export default function NuevaCompraPage() {
     setFormProducto((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   }
 
-  function handleAgregarProducto() {
+  async function handleAgregarProducto() {
     if (!formProducto.nombre.trim() || !formProducto.sku.trim()) return;
     setErrorSku(null);
 
-    const dup = productoExiste(formProducto.sku, formProducto.nombre);
+    const dup = await productoExiste(formProducto.sku, formProducto.nombre);
     if (dup) {
       setErrorSku(
         `Ya existe un producto con ese SKU o nombre ("${dup.nombre}" — ${dup.sku}).`
@@ -280,7 +282,7 @@ export default function NuevaCompraPage() {
       return;
     }
 
-    const creado = saveProducto({
+    const creado = await saveProducto({
       nombre: formProducto.nombre.trim().toUpperCase(),
       sku: formProducto.sku.trim().toUpperCase(),
       unidad_medida: formProducto.unidad_medida.toUpperCase(),
@@ -291,10 +293,12 @@ export default function NuevaCompraPage() {
       precio_venta: precioSugeridoNum || 0,
     });
 
+    if (!creado) return;
+
     recargarProductos();
     setForm((prev) => ({
       ...prev,
-      producto_id: String(creado.id),
+      producto_id: creado.id,
       precio_venta: formProducto.precio_venta_sugerido || prev.precio_venta,
     }));
     setProductoCreado(creado.nombre);

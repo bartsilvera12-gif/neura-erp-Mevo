@@ -103,7 +103,13 @@ export default function NuevaVentaPage() {
   const comboInputRef    = useRef<HTMLInputElement>(null);
   const comboContainerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setProductos(getProductos()); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    getProductos().then((data) => {
+      if (!cancelled) setProductos(data);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // Cerrar dropdown al hacer clic fuera
   useEffect(() => {
@@ -127,13 +133,13 @@ export default function NuevaVentaPage() {
   const tipoCambioNum   = moneda === "USD" ? (parseFloat(tipoCambio) || 0) : 1;
   const monedaBloqueada = items.length > 0;
 
-  const prodSel     = productos.find((p) => p.id === parseInt(lineaProdId));
+  const prodSel     = productos.find((p) => p.id === lineaProdId);
   const cantNum     = parseInt(lineaCant) || 0;
   const precioInput = parseFloat(lineaPrecio) || 0;
   const precioGs    = precioInput * tipoCambioNum;
 
   const enCarrito = items
-    .filter((i) => i.producto_id === parseInt(lineaProdId))
+    .filter((i) => i.producto_id === lineaProdId)
     .reduce((s, i) => s + i.cantidad, 0);
   const stockDisp = (prodSel?.stock_actual ?? 0) - enCarrito;
 
@@ -251,12 +257,12 @@ export default function NuevaVentaPage() {
     setItems((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErrorVenta(null);
     if (!ventaValida) return;
 
-    const resultado = saveVenta({
+    const resultado = await saveVenta({
       items,
       moneda,
       tipo_cambio:  tipoCambioNum,

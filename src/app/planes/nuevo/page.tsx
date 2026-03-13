@@ -49,7 +49,7 @@ export default function NuevoPlanPage() {
     }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -58,7 +58,7 @@ export default function NuevoPlanPage() {
       setError("El precio debe ser mayor a 0."); return;
     }
 
-    savePlan({
+    const guardado = await savePlan({
       nombre:          form.nombre.trim(),
       descripcion:     form.descripcion.trim() || undefined,
       precio:          parseFloat(form.precio),
@@ -70,7 +70,7 @@ export default function NuevoPlanPage() {
       estado:          form.estado,
     });
 
-    router.push("/planes");
+    if (guardado) router.push("/planes");
   }
 
   return (

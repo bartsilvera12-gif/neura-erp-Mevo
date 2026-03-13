@@ -44,7 +44,7 @@ export default function ComprasPage() {
 
   useEffect(() => {
     const data = getCompras();
-    setTodas([...data].sort((a, b) => b.id - a.id));
+    setTodas([...data].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()));
   }, []);
 
   const filtradas = todas.filter((c) => {

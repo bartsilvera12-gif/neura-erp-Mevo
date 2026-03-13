@@ -17,6 +17,7 @@ export default function EmpresaForm() {
 
   const [form, setForm] = useState({
     nombre_empresa: "",
+    plan: "",
     ruc: "",
     estado: "activo" as "activo" | "inactivo",
     email: "",
@@ -63,6 +64,7 @@ export default function EmpresaForm() {
     try {
       await crearEmpresa({
         nombre_empresa: form.nombre_empresa.trim(),
+        plan: form.plan.trim(),
         ruc: form.ruc.trim(),
         estado: form.estado,
         email: form.email.trim().toLowerCase(),
@@ -108,6 +110,17 @@ export default function EmpresaForm() {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
+              <label className={fLabel}>Plan</label>
+              <input
+                type="text"
+                name="plan"
+                value={form.plan}
+                onChange={handleChange}
+                placeholder="Ej: Básico, Pro, Enterprise"
+                className={fInput}
+              />
+            </div>
+            <div>
               <label className={fLabel}>RUC</label>
               <input
                 type="text"
@@ -118,18 +131,18 @@ export default function EmpresaForm() {
                 className={fInput}
               />
             </div>
-            <div>
-              <label className={fLabel}>Estado</label>
-              <select
-                name="estado"
-                value={form.estado}
-                onChange={handleChange}
-                className={fInput}
-              >
-                <option value="activo">Activo</option>
-                <option value="inactivo">Inactivo</option>
-              </select>
-            </div>
+          </div>
+          <div>
+            <label className={fLabel}>Estado</label>
+            <select
+              name="estado"
+              value={form.estado}
+              onChange={handleChange}
+              className={fInput}
+            >
+              <option value="activo">Activo</option>
+              <option value="inactivo">Inactivo</option>
+            </select>
           </div>
         </div>
       </section>

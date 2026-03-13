@@ -325,7 +325,7 @@ export default function GestionClientesPage() {
 
   function selectCliente(c: Cliente) {
     setSelected(c);
-    setFacturas(getFacturas(c.id));
+    getFacturas(c.id).then(setFacturas);
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {

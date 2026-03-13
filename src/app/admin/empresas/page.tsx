@@ -69,6 +69,7 @@ export default function AdminEmpresasPage() {
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/60">
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-5 py-3">Empresa</th>
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-5 py-3">Plan</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-5 py-3">RUC</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-5 py-3">Estado</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-5 py-3">Creada</th>
@@ -81,6 +82,7 @@ export default function AdminEmpresasPage() {
                   <td className="px-5 py-3.5">
                     <p className="text-sm font-semibold text-gray-800">{e.nombre_empresa}</p>
                   </td>
+                  <td className="px-5 py-3.5 text-sm text-gray-600">{e.plan ?? "—"}</td>
                   <td className="px-5 py-3.5 text-sm text-gray-600">{e.ruc ?? "—"}</td>
                   <td className="px-5 py-3.5"><BadgeEstado estado={e.estado} /></td>
                   <td className="px-5 py-3.5 text-xs text-gray-400">{formatFecha(e.created_at)}</td>

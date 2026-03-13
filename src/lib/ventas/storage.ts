@@ -9,7 +9,7 @@ const VENTAS_MOCK: Venta[] = [
     numero_control: "VTA-000001",
     items: [
       {
-        producto_id:           1,
+        producto_id:           "00000000-0000-0000-0000-000000000001",
         producto_nombre:       "REMERA OVERSIZE BLANCA",
         sku:                   "OOTD-001",
         cantidad:              5,
@@ -34,7 +34,7 @@ const VENTAS_MOCK: Venta[] = [
     numero_control: "VTA-000002",
     items: [
       {
-        producto_id:           2,
+        producto_id:           "00000000-0000-0000-0000-000000000002",
         producto_nombre:       "POLO NEGRA PREMIUM",
         sku:                   "OOTD-002",
         cantidad:              3,
@@ -46,7 +46,7 @@ const VENTAS_MOCK: Venta[] = [
         total_linea:           363000,
       },
       {
-        producto_id:           1,
+        producto_id:           "00000000-0000-0000-0000-000000000001",
         producto_nombre:       "REMERA OVERSIZE BLANCA",
         sku:                   "OOTD-001",
         cantidad:              2,
@@ -122,7 +122,7 @@ function migrarVentaLegacy(v: Record<string, unknown>): Venta {
   const total_linea  = subtotal + monto_iva;
 
   const item: LineaVenta = {
-    producto_id:           (v.producto_id      as number) || 0,
+    producto_id:           typeof v.producto_id === "string" ? v.producto_id : String(v.producto_id ?? ""),
     producto_nombre:       (v.producto_nombre  as string) || "",
     sku:                   (v.sku              as string) || "",
     cantidad,
@@ -169,19 +169,16 @@ export type ResultadoGuardarVenta =
  * 3. Persiste la venta en localStorage
  * 4. Por cada ítem: registra un movimiento SALIDA con referencia a la venta
  */
-export function saveVenta(
+export async function saveVenta(
   datos: Omit<Venta, "id" | "numero_control" | "fecha">
-): ResultadoGuardarVenta {
-
+): Promise<ResultadoGuardarVenta> {
   if (!datos.items || datos.items.length === 0) {
     return { success: false, error: "La venta debe tener al menos un producto." };
   }
 
-  // ── Validación de stock (proyectada para toda la venta) ────────────────────
-  const productos = getProductos();
+  const productos = await getProductos();
 
-  // Mapa: producto_id → stock proyectado (descuenta todos los ítems del carrito)
-  const stockMap: Record<number, number> = {};
+  const stockMap: Record<string, number> = {};
   for (const p of productos) {
     stockMap[p.id] = p.stock_actual;
   }
@@ -202,7 +199,6 @@ export function saveVenta(
     stockMap[item.producto_id] -= item.cantidad;
   }
 
-  // ── Persistir venta ────────────────────────────────────────────────────────
   const existentes = safeGet<Record<string, unknown>[]>(KEY, []);
   const base = existentes.length === 0
     ? (VENTAS_MOCK as unknown as Record<string, unknown>[])
@@ -217,11 +213,9 @@ export function saveVenta(
 
   safeSet(KEY, [...base, nueva]);
 
-  // ── Movimiento SALIDA por cada ítem ───────────────────────────────────────
   for (const item of nueva.items) {
     const prodInfo = productos.find((p) => p.id === item.producto_id);
-
-    saveMovimiento({
+    await saveMovimiento({
       producto_id:     item.producto_id,
       producto_nombre: item.producto_nombre,
       producto_sku:    item.sku,

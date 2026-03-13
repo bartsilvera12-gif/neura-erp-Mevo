@@ -57,7 +57,11 @@ export default function PlanesPage() {
   const [filtroPer, setFiltroPer] = useState<"" | "mensual" | "anual" | "unico">("");
 
   useEffect(() => {
-    setPlanes(getPlanes());
+    let cancelled = false;
+    getPlanes().then((data) => {
+      if (!cancelled) setPlanes(data);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const filtrados = planes.filter((p) => {
@@ -75,10 +79,10 @@ export default function PlanesPage() {
     return true;
   });
 
-  function handleToggleEstado(plan: Plan) {
+  async function handleToggleEstado(plan: Plan) {
     const nuevo = plan.estado === "activo" ? "inactivo" : "activo";
-    toggleEstadoPlan(plan.id, nuevo);
-    setPlanes(getPlanes());
+    await toggleEstadoPlan(plan.id, nuevo);
+    getPlanes().then(setPlanes);
   }
 
   return (

@@ -100,12 +100,11 @@ export default function NuevoProductoPage() {
     }
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErrorDuplicado(null);
 
-    // Verificar duplicado antes de guardar
-    const duplicado = productoExiste(form.sku, form.nombre);
+    const duplicado = await productoExiste(form.sku, form.nombre);
     if (duplicado) {
       setErrorDuplicado(
         `Ya existe "${duplicado.nombre}" con SKU ${duplicado.sku}.`
@@ -113,7 +112,7 @@ export default function NuevoProductoPage() {
       return;
     }
 
-    saveProducto({
+    const guardado = await saveProducto({
       nombre: form.nombre.trim().toUpperCase(),
       sku: form.sku.trim().toUpperCase(),
       costo_promedio: parseFloat(form.costo_promedio) || 0,
@@ -124,7 +123,7 @@ export default function NuevoProductoPage() {
       metodo_valuacion: form.metodo_valuacion,
     });
 
-    router.push("/inventario");
+    if (guardado) router.push("/inventario");
   }
 
   // ── Cálculos en tiempo real ──────────────────────────────────────────────────

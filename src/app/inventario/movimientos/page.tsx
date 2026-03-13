@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getMovimientos } from "@/lib/inventario/storage";
 import type { MovimientoInventario, TipoMovimiento, OrigenMovimiento } from "@/lib/inventario/types";
 
@@ -56,8 +57,11 @@ export default function MovimientosPage() {
   const [fechaHasta, setFechaHasta] = useState(""); // "YYYY-MM-DD"
 
   useEffect(() => {
-    const data = getMovimientos();
-    setTodos([...data].sort((a, b) => b.id - a.id));
+    let cancelled = false;
+    getMovimientos().then((data) => {
+      if (!cancelled) setTodos(data);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const filtrados = todos.filter((m) => {
@@ -91,6 +95,12 @@ export default function MovimientosPage() {
         <div className="flex justify-between items-center mb-5">
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-semibold">Historial</h2>
+            <Link
+              href="/inventario/movimientos/nuevo"
+              className="text-sm text-gray-600 hover:text-gray-900 underline"
+            >
+              Nuevo movimiento
+            </Link>
             <span className="text-sm text-gray-400">
               {filtrados.length} de {todos.length} registros
             </span>

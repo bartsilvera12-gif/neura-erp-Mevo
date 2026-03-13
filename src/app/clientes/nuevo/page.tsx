@@ -54,29 +54,29 @@ function NuevoClienteForm() {
     moneda_preferida:    "GS" as "GS" | "USD",
     vendedor_asignado:   "",
     origen:              "MANUAL" as OrigenCliente,
-    prospecto_id:        null as number | null,
+    prospecto_id:        null as string | null,
     estado:              "activo" as "activo" | "inactivo",
   });
 
   // Pre-fill desde CRM si viene con ?from_crm=id
   useEffect(() => {
     if (!fromCrmId) return;
-    const id = parseInt(fromCrmId);
-    if (isNaN(id)) return;
-    const prospecto = getProspecto(id);
-    if (!prospecto) return;
-
-    setCrmBanner(`Prospecto ${prospecto.numero_control} — ${prospecto.empresa}`);
-    setForm((prev) => ({
-      ...prev,
-      tipo_cliente:    "empresa",
-      empresa:         prospecto.empresa,
-      nombre_contacto: prospecto.contacto,
-      telefono:        prospecto.telefono ?? "",
-      email:           prospecto.email    ?? "",
-      origen:          "CRM",
-      prospecto_id:    prospecto.id,
-    }));
+    let cancelled = false;
+    getProspecto(fromCrmId).then((prospecto) => {
+      if (cancelled || !prospecto) return;
+      setCrmBanner(`Prospecto ${prospecto.numero_control} — ${prospecto.empresa}`);
+      setForm((prev) => ({
+        ...prev,
+        tipo_cliente:    "empresa",
+        empresa:         prospecto.empresa,
+        nombre_contacto: prospecto.contacto,
+        telefono:        prospecto.telefono ?? "",
+        email:           prospecto.email    ?? "",
+        origen:          "CRM",
+        prospecto_id:    prospecto.id,
+      }));
+    });
+    return () => { cancelled = true; };
   }, [fromCrmId]);
 
   const upper = ["empresa", "nombre_contacto", "ciudad", "pais", "categoria_cliente", "industria", "vendedor_asignado", "condicion_pago"];
@@ -124,7 +124,8 @@ function NuevoClienteForm() {
       moneda_preferida:    form.moneda_preferida,
       vendedor_asignado:   form.vendedor_asignado.trim().toUpperCase() || undefined,
       origen:              form.origen,
-      prospecto_id:        form.prospecto_id ?? undefined,
+      // prospecto_id en clientes es integer; CRM usa uuid — no pasamos el link por ahora
+      prospecto_id:        undefined,
       estado:              form.estado,
     });
 
@@ -134,7 +135,7 @@ function NuevoClienteForm() {
 
     // Marcar prospecto CRM como cliente_creado
     if (form.prospecto_id) {
-      updateProspecto(form.prospecto_id, { cliente_creado: true });
+      await updateProspecto(form.prospecto_id, { cliente_creado: true });
     }
 
     router.push(`/clientes/${nuevo.id}`);

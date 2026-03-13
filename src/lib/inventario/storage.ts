@@ -1,3 +1,5 @@
+import { supabase } from "@/lib/supabase";
+import { getCurrentUser } from "@/lib/auth";
 import type {
   Producto,
   MovimientoInventario,
@@ -5,253 +7,292 @@ import type {
   TipoMovimiento,
 } from "./types";
 
-// ─── Datos de ejemplo ────────────────────────────────────────────────────────
+// ─── Tipos de fila Supabase ───────────────────────────────────────────────────
 
-export const PRODUCTOS_MOCK: Producto[] = [
-  {
-    id: 1,
-    nombre: "Remera Oversize Blanca",
-    sku: "OOTD-001",
-    costo_promedio: 35000,
-    precio_venta: 75000,
-    stock_actual: 45,
-    stock_minimo: 10,
-    unidad_medida: "Unidad",
-    metodo_valuacion: "CPP" as MetodoValuacion,
-  },
-  {
-    id: 2,
-    nombre: "Polo Negra Premium",
-    sku: "OOTD-002",
-    costo_promedio: 48000,
-    precio_venta: 110000,
-    stock_actual: 18,
-    stock_minimo: 5,
-    unidad_medida: "Unidad",
-    metodo_valuacion: "FIFO" as MetodoValuacion,
-  },
-  {
-    id: 3,
-    nombre: "Canguro Gris Unisex",
-    sku: "OOTD-003",
-    costo_promedio: 90000,
-    precio_venta: 165000,
-    stock_actual: 12,
-    stock_minimo: 8,
-    unidad_medida: "Unidad",
-    metodo_valuacion: "LIFO" as MetodoValuacion,
-  },
-  {
-    id: 4,
-    nombre: "Bermuda Cargo Beige",
-    sku: "OOTD-004",
-    costo_promedio: 55000,
-    precio_venta: 120000,
-    stock_actual: 6,
-    stock_minimo: 10,
-    unidad_medida: "Unidad",
-    metodo_valuacion: "CPP" as MetodoValuacion,
-  },
-];
+interface ProductoRow {
+  id: string;
+  empresa_id: string;
+  nombre: string;
+  sku: string;
+  costo_promedio: number;
+  precio_venta: number;
+  stock_actual: number;
+  stock_minimo: number;
+  unidad_medida: string;
+  metodo_valuacion: string;
+  activo: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
-export const MOVIMIENTOS_MOCK: MovimientoInventario[] = [
-  {
-    id: 1,
-    producto_id: 1,
-    producto_nombre: "Remera Oversize Blanca",
-    producto_sku: "OOTD-001",
-    tipo: "ENTRADA",
-    cantidad: 50,
-    costo_unitario: 35000,
-    origen: "compra",
-    fecha: "2026-03-01T10:00:00.000Z",
-  },
-  {
-    id: 2,
-    producto_id: 2,
-    producto_nombre: "Polo Negra Premium",
-    producto_sku: "OOTD-002",
-    tipo: "SALIDA",
-    cantidad: 5,
-    costo_unitario: 48000,
-    origen: "venta",
-    fecha: "2026-03-03T14:30:00.000Z",
-  },
-  {
-    id: 3,
-    producto_id: 3,
-    producto_nombre: "Canguro Gris Unisex",
-    producto_sku: "OOTD-003",
-    tipo: "SALIDA",
-    cantidad: 8,
-    costo_unitario: 90000,
-    origen: "venta",
-    fecha: "2026-03-04T11:00:00.000Z",
-  },
-  {
-    id: 4,
-    producto_id: 4,
-    producto_nombre: "Bermuda Cargo Beige",
-    producto_sku: "OOTD-004",
-    tipo: "AJUSTE",
-    cantidad: -2,
-    costo_unitario: 55000,
-    origen: "ajuste_manual",
-    fecha: "2026-03-05T09:15:00.000Z",
-  },
-];
+interface MovimientoRow {
+  id: string;
+  empresa_id: string;
+  producto_id: string;
+  producto_nombre: string;
+  producto_sku: string;
+  tipo: string;
+  cantidad: number;
+  costo_unitario: number;
+  origen: string;
+  referencia: string | null;
+  fecha: string;
+  created_at: string;
+  updated_at: string;
+}
 
-// ─── Claves de localStorage ───────────────────────────────────────────────────
+// ─── Mapeo fila → tipo ────────────────────────────────────────────────────────
 
-const KEY_PRODUCTOS = "neura_productos";
-const KEY_STOCK_OVERRIDES = "neura_stock_overrides";
-const KEY_PRECIO_OVERRIDES = "neura_precio_overrides";
-const KEY_MOVIMIENTOS = "neura_movimientos";
+function rowToProducto(row: ProductoRow): Producto {
+  return {
+    id: row.id,
+    nombre: row.nombre,
+    sku: row.sku,
+    costo_promedio: Number(row.costo_promedio),
+    precio_venta: Number(row.precio_venta),
+    stock_actual: Number(row.stock_actual),
+    stock_minimo: Number(row.stock_minimo),
+    unidad_medida: row.unidad_medida,
+    metodo_valuacion: row.metodo_valuacion as MetodoValuacion,
+  };
+}
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+function rowToMovimiento(row: MovimientoRow): MovimientoInventario {
+  return {
+    id: row.id,
+    producto_id: row.producto_id,
+    producto_nombre: row.producto_nombre,
+    producto_sku: row.producto_sku,
+    tipo: row.tipo as TipoMovimiento,
+    cantidad: Number(row.cantidad),
+    costo_unitario: Number(row.costo_unitario),
+    origen: row.origen as MovimientoInventario["origen"],
+    referencia: row.referencia ?? undefined,
+    fecha: row.fecha,
+  };
+}
 
-function safeGet<T>(key: string, fallback: T): T {
-  try {
-    const item = localStorage.getItem(key);
-    return item ? (JSON.parse(item) as T) : fallback;
-  } catch {
-    return fallback;
+// ─── Productos ─────────────────────────────────────────────────────────────────
+
+/** Lista productos. RLS filtra por empresa automáticamente. */
+export async function getProductos(): Promise<Producto[]> {
+  const { data, error } = await supabase
+    .from("productos")
+    .select("*")
+    .eq("activo", true)
+    .order("nombre");
+
+  if (error) {
+    console.error("[inventario] getProductos:", error.message);
+    return [];
   }
+  return (data as ProductoRow[]).map(rowToProducto);
 }
 
-function safeSet(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // localStorage no disponible (SSR o bloqueado)
+/** Obtiene un producto por ID. */
+export async function getProducto(id: string): Promise<Producto | null> {
+  const { data, error } = await supabase
+    .from("productos")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    console.error("[inventario] getProducto:", error.message);
+    return null;
   }
-}
-
-// ─── Productos ────────────────────────────────────────────────────────────────
-
-/**
- * Devuelve todos los productos (mocks + guardados), con el stock_actual
- * ajustado según los overrides generados por movimientos.
- */
-type PrecioOverride = { precio_venta?: number; costo_promedio?: number };
-
-export function getProductos(): Producto[] {
-  const custom = safeGet<Producto[]>(KEY_PRODUCTOS, []);
-  const stockOverrides = safeGet<Record<number, number>>(KEY_STOCK_OVERRIDES, {});
-  const precioOverrides = safeGet<Record<number, PrecioOverride>>(KEY_PRECIO_OVERRIDES, {});
-  const todos = [...PRODUCTOS_MOCK, ...custom];
-  return todos.map((p) => {
-    const po = precioOverrides[p.id];
-    return {
-      ...p,
-      stock_actual:
-        stockOverrides[p.id] !== undefined ? stockOverrides[p.id] : p.stock_actual,
-      precio_venta: po?.precio_venta ?? p.precio_venta,
-      costo_promedio: po?.costo_promedio ?? p.costo_promedio,
-    };
-  });
+  return rowToProducto(data as ProductoRow);
 }
 
 /**
- * Actualiza precio_venta y/o costo_promedio de un producto en localStorage.
- * Compatible con mocks y productos custom (usa el mismo sistema de overrides).
+ * Comprueba si ya existe un producto con el mismo SKU o nombre (case-insensitive).
+ * Devuelve el producto encontrado o null.
  */
-export function updateProductoPrecios(
-  productoId: number,
-  datos: { precio_venta?: number; costo_promedio?: number }
-): void {
-  const overrides = safeGet<Record<number, PrecioOverride>>(KEY_PRECIO_OVERRIDES, {});
-  overrides[productoId] = { ...overrides[productoId], ...datos };
-  safeSet(KEY_PRECIO_OVERRIDES, overrides);
-}
-
-/**
- * Comprueba si ya existe un producto con el mismo SKU (obligatorio)
- * o el mismo nombre (case-insensitive). Devuelve el producto encontrado o null.
- */
-export function productoExiste(sku: string, nombre: string): Producto | null {
-  const todos = getProductos();
+export async function productoExiste(
+  sku: string,
+  nombre: string
+): Promise<Producto | null> {
+  const productos = await getProductos();
+  const skuNorm = sku.toLowerCase().trim();
+  const nombreNorm = nombre.toLowerCase().trim();
   return (
-    todos.find(
+    productos.find(
       (p) =>
-        p.sku.toLowerCase() === sku.toLowerCase() ||
-        p.nombre.toLowerCase() === nombre.toLowerCase()
+        p.sku.toLowerCase() === skuNorm ||
+        p.nombre.toLowerCase() === nombreNorm
     ) ?? null
   );
 }
 
-/**
- * Guarda un producto nuevo y, si tiene stock_actual > 0,
- * genera automáticamente un movimiento ENTRADA de inventario_inicial.
- */
-export function saveProducto(datos: Omit<Producto, "id">): Producto {
-  const nuevo: Producto = { id: Date.now(), ...datos };
-  const existentes = safeGet<Producto[]>(KEY_PRODUCTOS, []);
-  safeSet(KEY_PRODUCTOS, [...existentes, nuevo]);
+export type NuevoProductoData = Omit<Producto, "id">;
 
-  if (nuevo.stock_actual > 0) {
-    saveMovimiento({
-      producto_id: nuevo.id,
-      producto_nombre: nuevo.nombre,
-      producto_sku: nuevo.sku,
+/** Crea producto. empresa_id se obtiene del usuario; RLS valida acceso. */
+export async function saveProducto(
+  datos: NuevoProductoData
+): Promise<Producto | null> {
+  const usuario = await getCurrentUser();
+  if (!usuario?.empresa_id) throw new Error("Usuario no autenticado o sin empresa");
+
+  const insert = {
+    empresa_id: usuario.empresa_id,
+    nombre: datos.nombre,
+    sku: datos.sku,
+    costo_promedio: datos.costo_promedio,
+    precio_venta: datos.precio_venta,
+    stock_actual: datos.stock_actual ?? 0,
+    stock_minimo: datos.stock_minimo ?? 0,
+    unidad_medida: datos.unidad_medida || "Unidad",
+    metodo_valuacion: datos.metodo_valuacion,
+  };
+
+  const { data, error } = await supabase
+    .from("productos")
+    .insert([insert])
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[inventario] saveProducto:", error.message);
+    return null;
+  }
+
+  const producto = rowToProducto(data as ProductoRow);
+
+  // Si tiene stock inicial, generar movimiento de inventario_inicial
+  if (producto.stock_actual > 0) {
+    await saveMovimiento({
+      producto_id: producto.id,
+      producto_nombre: producto.nombre,
+      producto_sku: producto.sku,
       tipo: "ENTRADA",
-      cantidad: nuevo.stock_actual,
-      costo_unitario: nuevo.costo_promedio,
+      cantidad: producto.stock_actual,
+      costo_unitario: producto.costo_promedio,
       origen: "inventario_inicial",
       fecha: new Date().toISOString(),
     });
   }
 
-  return nuevo;
+  return producto;
 }
 
-// ─── Movimientos ──────────────────────────────────────────────────────────────
-
-/** Devuelve movimientos guardados; usa mocks si aún no hay datos reales. */
-export function getMovimientos(): MovimientoInventario[] {
-  const stored = safeGet<MovimientoInventario[]>(KEY_MOVIMIENTOS, []);
-  return stored.length === 0 ? MOVIMIENTOS_MOCK : stored;
+/** Actualiza solo precio_venta y/o costo_promedio. Wrapper de updateProducto. */
+export async function updateProductoPrecios(
+  productoId: string,
+  datos: { precio_venta?: number; costo_promedio?: number }
+): Promise<void> {
+  await updateProducto(productoId, datos);
 }
 
-/**
- * Guarda un nuevo movimiento y actualiza el stock_actual del producto afectado.
- *
- * Reglas de impacto en stock:
- *   ENTRADA → stock + |cantidad|
- *   SALIDA  → stock - |cantidad|  (mínimo 0)
- *   AJUSTE  → stock + cantidad    (puede ser negativo para disminuir)
- */
-export function saveMovimiento(
-  mov: Omit<MovimientoInventario, "id">
-): void {
-  // 1. Persiste el movimiento
-  const existentes = safeGet<MovimientoInventario[]>(KEY_MOVIMIENTOS, []);
-  const base =
-    existentes.length === 0 ? [...MOVIMIENTOS_MOCK] : existentes;
-  const nuevo: MovimientoInventario = { id: Date.now(), ...mov };
-  safeSet(KEY_MOVIMIENTOS, [...base, nuevo]);
+/** Actualiza producto. RLS valida que pertenezca a la empresa del usuario. */
+export async function updateProducto(
+  id: string,
+  datos: Partial<Omit<Producto, "id">>
+): Promise<Producto | null> {
+  const patch: Record<string, unknown> = {};
+  if (datos.nombre !== undefined) patch.nombre = datos.nombre;
+  if (datos.sku !== undefined) patch.sku = datos.sku;
+  if (datos.costo_promedio !== undefined) patch.costo_promedio = datos.costo_promedio;
+  if (datos.precio_venta !== undefined) patch.precio_venta = datos.precio_venta;
+  if (datos.stock_actual !== undefined) patch.stock_actual = datos.stock_actual;
+  if (datos.stock_minimo !== undefined) patch.stock_minimo = datos.stock_minimo;
+  if (datos.unidad_medida !== undefined) patch.unidad_medida = datos.unidad_medida;
+  if (datos.metodo_valuacion !== undefined) patch.metodo_valuacion = datos.metodo_valuacion;
 
-  // 2. Calcula el delta de stock según el tipo
-  const delta = calcularDelta(mov.tipo, mov.cantidad);
+  const { data, error } = await supabase
+    .from("productos")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .single();
 
-  // 3. Obtiene el stock actual del producto (con overrides ya aplicados)
-  const productos = getProductos();
-  const producto = productos.find((p) => p.id === mov.producto_id);
-  if (!producto) return;
+  if (error) {
+    console.error("[inventario] updateProducto:", error.message);
+    return null;
+  }
+  return rowToProducto(data as ProductoRow);
+}
 
-  const nuevoStock = Math.max(0, producto.stock_actual + delta);
+// ─── Movimientos ─────────────────────────────────────────────────────────────
 
-  // 4. Persiste el override de stock
-  const overrides = safeGet<Record<number, number>>(
-    KEY_STOCK_OVERRIDES,
-    {}
-  );
-  overrides[mov.producto_id] = nuevoStock;
-  safeSet(KEY_STOCK_OVERRIDES, overrides);
+/** Lista movimientos. RLS filtra por empresa automáticamente. */
+export async function getMovimientos(): Promise<MovimientoInventario[]> {
+  const { data, error } = await supabase
+    .from("movimientos_inventario")
+    .select("*")
+    .order("fecha", { ascending: false });
+
+  if (error) {
+    console.error("[inventario] getMovimientos:", error.message);
+    return [];
+  }
+  return (data as MovimientoRow[]).map(rowToMovimiento);
 }
 
 function calcularDelta(tipo: TipoMovimiento, cantidad: number): number {
   if (tipo === "ENTRADA") return Math.abs(cantidad);
   if (tipo === "SALIDA") return -Math.abs(cantidad);
   return cantidad; // AJUSTE: la cantidad ya lleva el signo
+}
+
+export type NuevoMovimientoData = Omit<MovimientoInventario, "id">;
+
+/**
+ * Registra un movimiento y actualiza stock_actual del producto.
+ * empresa_id se obtiene del usuario; RLS valida acceso.
+ */
+export async function saveMovimiento(
+  mov: NuevoMovimientoData
+): Promise<MovimientoInventario | null> {
+  const usuario = await getCurrentUser();
+  if (!usuario?.empresa_id) throw new Error("Usuario no autenticado o sin empresa");
+
+  // 1. Obtener producto actual
+  const producto = await getProducto(mov.producto_id);
+  if (!producto) {
+    console.error("[inventario] saveMovimiento: producto no encontrado");
+    return null;
+  }
+
+  const delta = calcularDelta(mov.tipo, mov.cantidad);
+  const nuevoStock = Math.max(0, producto.stock_actual + delta);
+  const debeActualizarStock = mov.origen !== "inventario_inicial"; // inventario_inicial ya viene del insert
+
+  // 2. Insertar movimiento
+  const insert = {
+    empresa_id: usuario.empresa_id,
+    producto_id: mov.producto_id,
+    producto_nombre: mov.producto_nombre,
+    producto_sku: mov.producto_sku,
+    tipo: mov.tipo,
+    cantidad: mov.cantidad,
+    costo_unitario: mov.costo_unitario,
+    origen: mov.origen,
+    referencia: mov.referencia ?? null,
+    fecha: mov.fecha,
+  };
+
+  const { data: movData, error: movError } = await supabase
+    .from("movimientos_inventario")
+    .insert([insert])
+    .select()
+    .single();
+
+  if (movError) {
+    console.error("[inventario] saveMovimiento:", movError.message);
+    return null;
+  }
+
+  // 3. Actualizar stock del producto (salvo inventario_inicial, que ya está en el insert)
+  if (debeActualizarStock) {
+    const { error: updError } = await supabase
+      .from("productos")
+      .update({ stock_actual: nuevoStock })
+      .eq("id", mov.producto_id);
+
+    if (updError) {
+      console.error("[inventario] saveMovimiento (update stock):", updError.message);
+    }
+  }
+
+  return rowToMovimiento(movData as MovimientoRow);
 }

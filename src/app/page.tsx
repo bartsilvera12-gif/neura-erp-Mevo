@@ -3,97 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { getConfig } from "@/lib/config/storage";
 import { getUsuarios } from "@/lib/usuarios/storage";
+import { getDashboardData } from "@/lib/dashboard/data";
 import type { ConfigGlobal } from "@/lib/config/types";
 import type { Usuario } from "@/lib/usuarios/types";
-
-// ── Raw interfaces (localStorage) ────────────────────────────────────────────
-
-interface ProspectoRaw {
-  id:              number;
-  empresa:         string;
-  contacto?:       string;
-  etapa:           string;
-  valor_estimado?: number;
-  fecha_creacion:  string;
-  responsable?:    string;
-  cliente_creado?: boolean;
-}
-
-interface ClienteRaw {
-  id:                number;
-  codigo_cliente:    string;
-  empresa?:          string;
-  nombre_contacto:   string;
-  origen:            string;
-  created_at:        string;
-  vendedor_asignado?: string;
-}
-
-interface FacturaRaw {
-  id:               number;
-  cliente_id:       number;
-  numero_factura:   string;
-  fecha:            string;
-  fecha_vencimiento: string;
-  monto:            number;
-  saldo:            number;
-  estado:           string;
-  tipo:             string;
-  moneda:           string;
-}
-
-interface TipificacionRaw {
-  id:           number;
-  cliente_id:   number;
-  tipo_gestion: string;
-  resultado:    string;
-  observacion?: string;
-  usuario:      string;
-  fecha:        string;
-}
-
-interface ProductoRaw {
-  id:               number;
-  nombre:           string;
-  sku:              string;
-  costo_promedio:   number;
-  precio_venta:     number;
-  stock_actual:     number;
-  stock_minimo:     number;
-  unidad_medida:    string;
-  metodo_valuacion: string;
-}
-
-interface LineaVentaRaw {
-  producto_id:     number;
-  producto_nombre: string;
-  sku?:            string;
-  cantidad:        number;
-  precio_venta:    number;
-  subtotal:        number;
-  monto_iva?:      number;
-  total:           number;
-}
-
-interface VentaRaw {
-  id:            number;
-  numero_control: string;
-  lineas:        LineaVentaRaw[];
-  subtotal:      number;
-  monto_iva:     number;
-  total:         number;
-  tipo_venta:    string;
-  moneda:        string;
-  tipo_cambio?:  number;
-  fecha:         string;
-}
-
-interface CompraRaw {
-  id:               number;
-  producto_id?:     number;
-  producto_nombre:  string;
-  proveedor_nombre: string;
-}
+import type {
+  ProspectoRaw,
+  ClienteRaw,
+  FacturaRaw,
+  TipificacionRaw,
+  ProductoRaw,
+  VentaRaw,
+  CompraRaw,
+} from "@/lib/dashboard/data";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -101,13 +22,6 @@ type Periodo = "hoy" | "7d" | "30d" | "mes" | "anio";
 type TabDash = "comercial" | "financiero" | "inventario" | "ventas";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function safeGet<T>(key: string, fallback: T): T {
-  try {
-    const raw = typeof window !== "undefined" ? localStorage.getItem(key) : null;
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch { return fallback; }
-}
 
 function formatGs(n: number): string {
   return n.toLocaleString("es-PY");
@@ -341,13 +255,13 @@ function KpiCard({
   label, value, sub, color = "text-gray-900", icon,
 }: { label: string; value: string; sub?: string; color?: string; icon: string }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
       <div className="flex items-start justify-between gap-2">
-        <div className="text-xl">{icon}</div>
+        <div className="text-3xl">{icon}</div>
       </div>
-      <p className={`text-2xl font-bold mt-2 tabular-nums ${color}`}>{value}</p>
-      <p className="text-xs font-semibold text-gray-700 mt-0.5">{label}</p>
-      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+      <p className={`text-3xl font-bold mt-3 tabular-nums ${color}`}>{value}</p>
+      <p className="text-xs font-semibold text-slate-600 mt-1">{label}</p>
+      {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
     </div>
   );
 }
@@ -716,8 +630,8 @@ function DashInventario({
   const cntCritico   = productos.filter(p => p.stock_actual <= 0).length;
 
   const proveedorMap = useMemo(() => {
-    const map: Record<number, string> = {};
-    compras.forEach(c => { if (c.producto_id) map[c.producto_id] = c.proveedor_nombre; });
+    const map: Record<string, string> = {};
+    compras.forEach(c => { if (c.producto_id) map[String(c.producto_id)] = c.proveedor_nombre; });
     return map;
   }, [compras]);
 
@@ -787,7 +701,7 @@ function DashInventario({
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-xs text-gray-500 tabular-nums">{p.stock_minimo} {p.unidad_medida}</td>
-                    <td className="px-3 py-2.5 text-xs text-gray-500">{proveedorMap[p.id] ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-500">{proveedorMap[String(p.id)] ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1053,15 +967,26 @@ export default function DashboardPage() {
     const defaultUser = us.find(u => u.nivel === "administrador") ?? us[0] ?? null;
     setUsuarioId(savedId ?? defaultUser?.id ?? null);
 
-    // Datos de módulos
-    setProspectos(safeGet<ProspectoRaw[]>("neura_crm", []));
-    setClientes(safeGet<ClienteRaw[]>("neura_clientes", []));
-    setFacturas(safeGet<FacturaRaw[]>("neura_facturas", []));
-    setTipificaciones(safeGet<TipificacionRaw[]>("neura_tipificaciones", []));
-    setProductos(safeGet<ProductoRaw[]>("neura_productos", []));
-    setVentas(safeGet<VentaRaw[]>("neura_ventas", []));
-    setCompras(safeGet<CompraRaw[]>("neura_compras", []));
-
+    // Datos de módulos desde Supabase
+    getDashboardData()
+      .then((data) => {
+        setProspectos(data.prospectos);
+        setClientes(data.clientes);
+        setFacturas(data.facturas);
+        setTipificaciones(data.tipificaciones);
+        setProductos(data.productos);
+        setVentas(data.ventas);
+        setCompras(data.compras);
+      })
+      .catch(() => {
+        setProspectos([]);
+        setClientes([]);
+        setFacturas([]);
+        setTipificaciones([]);
+        setProductos([]);
+        setVentas([]);
+        setCompras([]);
+      });
   }, []);
 
   function handleUsuarioChange(id: number) {
@@ -1099,7 +1024,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-h-screen bg-slate-50 p-6 space-y-6">
 
       {/* Encabezado */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -1146,7 +1071,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit flex-wrap">
+      <div className="flex gap-1 bg-white rounded-full shadow-sm border border-slate-200 p-1.5 w-fit flex-wrap">
         {([
           { id: "comercial",   label: "Comercial",   icon: "📊" },
           { id: "financiero",  label: "Financiero",  icon: "💰" },
@@ -1154,8 +1079,8 @@ export default function DashboardPage() {
           { id: "ventas",      label: "Ventas",      icon: "🛒" },
         ] as { id: TabDash; label: string; icon: string }[]).map(t => (
           <button key={t.id} type="button" onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all ${
-              tab === t.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+            className={`flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium rounded-full transition-all ${
+              tab === t.id ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
             }`}>
             <span>{t.icon}</span>{t.label}
           </button>

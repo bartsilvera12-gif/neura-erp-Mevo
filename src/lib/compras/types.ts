@@ -3,13 +3,13 @@ export type TipoIva = "exenta" | "5" | "10";
 export type Moneda = "PYG" | "USD";
 
 export interface Compra {
-  id: number;
+  id: string;
   numero_control: string;        // COMP-000001, COMP-000002, ...
 
-  proveedor_id: number;
+  proveedor_id: string;
   proveedor_nombre: string;
 
-  producto_id: number;
+  producto_id: string;
   producto_nombre: string;
 
   cantidad: number;

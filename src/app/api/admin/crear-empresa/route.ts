@@ -6,6 +6,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const {
       nombre_empresa,
+      plan,
       ruc,
       estado,
       email,
@@ -39,6 +40,7 @@ export async function POST(req: Request) {
       .from("empresas")
       .insert([{
         nombre_empresa: nombre_empresa.trim(),
+        plan: plan?.trim() || null,
         ruc: ruc?.trim() || null,
         estado: estado || "activo",
       }])
@@ -63,7 +65,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: errAuth.message }, { status: 400 });
     }
 
-    // 3 — Insertar en tabla usuarios
+    // 3 — Insertar en tabla usuarios (email vincula con auth.users para RLS)
     const { error: errUsuario } = await supabase.from("usuarios").insert([{
       empresa_id: empresaId,
       nombre: nombre.trim(),

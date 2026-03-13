@@ -97,8 +97,8 @@ function ProspectoCard({
   onMoverEtapa,
 }: {
   prospecto:    Prospecto;
-  onDragStart:  (id: number) => void;
-  onMoverEtapa: (id: number, etapa: EtapaFunnel) => void;
+  onDragStart:  (id: string) => void;
+  onMoverEtapa: (id: string, etapa: EtapaFunnel) => void;
 }) {
   const esGanado  = prospecto.etapa === "GANADO";
   const esPerdido = prospecto.etapa === "PERDIDO";
@@ -244,8 +244,8 @@ function Columna({
   onDragOver:   (e: React.DragEvent) => void;
   onDragLeave:  () => void;
   onDrop:       (e: React.DragEvent) => void;
-  onDragStart:  (id: number) => void;
-  onMoverEtapa: (id: number, etapa: EtapaFunnel) => void;
+  onDragStart:  (id: string) => void;
+  onMoverEtapa: (id: string, etapa: EtapaFunnel) => void;
 }) {
   const cfg   = ETAPA_CFG[etapa];
   const total = prospectos.reduce((s, p) => s + p.valor_estimado, 0);
@@ -333,31 +333,31 @@ export default function CrmPage() {
   const [dragOverEtapa, setDragOverEtapa] = useState<EtapaFunnel | null>(null);
   const [desdeDate,     setDesdeDate]     = useState(hoyStr());
   const [hastaDate,     setHastaDate]     = useState(hoyStr());
-  const dragIdRef = useRef<number | null>(null);
+  const dragIdRef = useRef<string | null>(null);
 
   function recargar() {
-    setProspectos(getProspectos());
+    getProspectos().then(setProspectos);
   }
 
   useEffect(() => { recargar(); }, []);
 
-  function handleDragStart(id: number) {
+  function handleDragStart(id: string) {
     dragIdRef.current = id;
   }
 
-  function handleDrop(e: React.DragEvent, etapa: EtapaFunnel) {
+  async function handleDrop(e: React.DragEvent, etapa: EtapaFunnel) {
     e.preventDefault();
-    const id = parseInt(e.dataTransfer.getData("text/plain"));
-    if (!isNaN(id)) {
-      moveProspecto(id, etapa);
+    const id = e.dataTransfer.getData("text/plain");
+    if (id) {
+      await moveProspecto(id, etapa);
       recargar();
     }
     setDragOverEtapa(null);
     dragIdRef.current = null;
   }
 
-  function handleMoverEtapa(id: number, etapa: EtapaFunnel) {
-    moveProspecto(id, etapa);
+  async function handleMoverEtapa(id: string, etapa: EtapaFunnel) {
+    await moveProspecto(id, etapa);
     recargar();
   }
 

@@ -5,11 +5,11 @@ import { getProductos, saveMovimiento, updateProductoPrecios } from "@/lib/inven
 
 const COMPRAS_MOCK: Compra[] = [
   {
-    id: 1,
+    id: "00000000-0000-0000-0000-000000000001",
     numero_control: "COMP-000001",
-    proveedor_id: 1,
+    proveedor_id: "1",
     proveedor_nombre: "Textiles del Sur S.A.",
-    producto_id: 1,
+    producto_id: "00000000-0000-0000-0000-000000000001",
     producto_nombre: "Remera Oversize Blanca",
     cantidad: 50,
     moneda: "PYG",
@@ -27,11 +27,11 @@ const COMPRAS_MOCK: Compra[] = [
     fecha: "2026-03-01T08:00:00.000Z",
   },
   {
-    id: 2,
+    id: "00000000-0000-0000-0000-000000000002",
     numero_control: "COMP-000002",
-    proveedor_id: 2,
+    proveedor_id: "2",
     proveedor_nombre: "Importadora Asunción",
-    producto_id: 3,
+    producto_id: "00000000-0000-0000-0000-000000000003",
     producto_nombre: "Canguro Gris Unisex",
     cantidad: 20,
     moneda: "USD",
@@ -102,12 +102,12 @@ export function getCompras(): Compra[] {
  * 3. Registra movimiento ENTRADA vinculado al número de control
  * 4. Actualiza precio_venta y costo_promedio del producto
  */
-export function saveCompra(datos: Omit<Compra, "id" | "numero_control" | "fecha">): Compra {
+export async function saveCompra(datos: Omit<Compra, "id" | "numero_control" | "fecha">): Promise<Compra> {
   const existentes = safeGet<Compra[]>(KEY, []);
   const base = existentes.length === 0 ? [...COMPRAS_MOCK] : existentes;
 
   const nueva: Compra = {
-    id: Date.now(),
+    id: crypto.randomUUID(),
     numero_control: generarNumeroControl(base),
     fecha: new Date().toISOString(),
     ...datos,
@@ -115,12 +115,10 @@ export function saveCompra(datos: Omit<Compra, "id" | "numero_control" | "fecha"
 
   safeSet(KEY, [...base, nueva]);
 
-  // Resuelve el SKU del producto para incluirlo en el movimiento
-  const productos = getProductos();
+  const productos = await getProductos();
   const skuProducto = productos.find((p) => p.id === nueva.producto_id)?.sku ?? "";
 
-  // Impacto en inventario: movimiento ENTRADA
-  saveMovimiento({
+  await saveMovimiento({
     producto_id: nueva.producto_id,
     producto_nombre: nueva.producto_nombre,
     producto_sku: skuProducto,
@@ -132,8 +130,7 @@ export function saveCompra(datos: Omit<Compra, "id" | "numero_control" | "fecha"
     referencia: nueva.numero_control,
   });
 
-  // Actualiza precio_venta y costo_promedio del producto en inventario
-  updateProductoPrecios(nueva.producto_id, {
+  await updateProductoPrecios(nueva.producto_id, {
     precio_venta: nueva.precio_venta,
     costo_promedio: nueva.costo_unitario,
   });

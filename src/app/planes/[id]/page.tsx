@@ -72,8 +72,8 @@ function PlanDetailContent() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   if (!params) return null;
-  const id           = parseInt(params.id as string, 10);
-  const editMode     = searchParams?.get("edit") === "1";
+  const id = params.id as string;
+  const editMode = searchParams?.get("edit") === "1";
 
   const [plan,      setPlan]      = useState<Plan | null>(null);
   const [editing,   setEditing]   = useState(editMode);
@@ -93,19 +93,20 @@ function PlanDetailContent() {
   });
 
   useEffect(() => {
-    const p = getPlan(id);
-    if (!p) { router.push("/planes"); return; }
-    setPlan(p);
-    setForm({
-      nombre:          p.nombre,
-      descripcion:     p.descripcion ?? "",
-      precio:          String(p.precio),
-      moneda:          p.moneda,
-      periodicidad:    p.periodicidad,
-      limite_usuarios: p.limite_usuarios !== null ? String(p.limite_usuarios) : "",
-      limite_clientes: p.limite_clientes !== null ? String(p.limite_clientes) : "",
-      limite_facturas: p.limite_facturas !== null ? String(p.limite_facturas) : "",
-      estado:          p.estado,
+    getPlan(id).then((p) => {
+      if (!p) { router.push("/planes"); return; }
+      setPlan(p);
+      setForm({
+        nombre:          p.nombre,
+        descripcion:     p.descripcion ?? "",
+        precio:          String(p.precio),
+        moneda:          p.moneda,
+        periodicidad:    p.periodicidad,
+        limite_usuarios: p.limite_usuarios !== null ? String(p.limite_usuarios) : "",
+        limite_clientes: p.limite_clientes !== null ? String(p.limite_clientes) : "",
+        limite_facturas: p.limite_facturas !== null ? String(p.limite_facturas) : "",
+        estado:          p.estado,
+      });
     });
   }, [id, router]);
 
@@ -118,7 +119,7 @@ function PlanDetailContent() {
     }));
   }
 
-  function handleGuardar(e: React.FormEvent) {
+  async function handleGuardar(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
 
@@ -127,7 +128,7 @@ function PlanDetailContent() {
       setFormError("El precio debe ser mayor a 0."); return;
     }
 
-    updatePlan(id, {
+    const actualizado = await updatePlan(id, {
       nombre:          form.nombre.trim(),
       descripcion:     form.descripcion.trim() || undefined,
       precio:          parseFloat(form.precio),
@@ -139,18 +140,18 @@ function PlanDetailContent() {
       estado:          form.estado,
     });
 
-    router.push("/planes");
+    if (actualizado) router.push("/planes");
   }
 
-  function handleToggleEstado() {
+  async function handleToggleEstado() {
     if (!plan) return;
     const nuevo = plan.estado === "activo" ? "inactivo" : "activo";
-    toggleEstadoPlan(id, nuevo);
+    await toggleEstadoPlan(id, nuevo);
     router.push("/planes");
   }
 
-  function handleEliminar() {
-    deletePlan(id);
+  async function handleEliminar() {
+    await deletePlan(id);
     router.push("/planes");
   }
 

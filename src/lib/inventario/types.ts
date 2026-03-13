@@ -3,7 +3,7 @@ export type TipoMovimiento = "ENTRADA" | "SALIDA" | "AJUSTE";
 export type OrigenMovimiento = "compra" | "venta" | "ajuste_manual" | "inventario_inicial";
 
 export interface Producto {
-  id: number;
+  id: string;
   nombre: string;
   sku: string;
   costo_promedio: number;
@@ -15,8 +15,8 @@ export interface Producto {
 }
 
 export interface MovimientoInventario {
-  id: number;
-  producto_id: number;
+  id: string;
+  producto_id: string;
   producto_nombre: string;
   producto_sku: string;
   tipo: TipoMovimiento;

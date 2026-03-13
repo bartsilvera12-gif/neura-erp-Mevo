@@ -1,237 +1,266 @@
-import type { Prospecto, EtapaFunnel, Nota } from "./types";
+import { supabase } from "@/lib/supabase";
+import { getCurrentUser } from "@/lib/auth";
+import type { Prospecto, Nota, EtapaFunnel } from "./types";
 
-// ─── Datos de ejemplo ─────────────────────────────────────────────────────────
+// ─── Tipos de fila Supabase ───────────────────────────────────────────────────
 
-const PROSPECTOS_MOCK: Prospecto[] = [
-  {
-    id: 1,
-    numero_control: "CRM-000001",
-    empresa:        "ACME S.A.",
-    contacto:       "CARLOS RODRÍGUEZ",
-    email:          "carlos@acme.com",
-    telefono:       "0981-123456",
-    servicio:       "Implementación ERP completa",
-    valor_estimado: 45000000,
-    etapa:          "LEAD",
-    proxima_accion:       "Agendar reunión de presentación",
-    fecha_proxima_accion: "2026-03-15",
-    creado_por:     "JUAN PÉREZ",
-    responsable:    "JUAN PÉREZ",
-    notas: [
-      {
-        id:    1,
-        texto: "Primer contacto vía LinkedIn. Tiene interés en el módulo de ventas e inventario.",
-        fecha: "2026-03-01T09:00:00.000Z",
-      },
-    ],
-    fecha_creacion:      "2026-03-09T09:00:00.000Z",
-    fecha_actualizacion: "2026-03-09T09:00:00.000Z",
-  },
-  {
-    id: 2,
-    numero_control: "CRM-000002",
-    empresa:        "TECNO CORP S.R.L.",
-    contacto:       "ANA MARTÍNEZ",
-    email:          "ana@tecnocorp.com",
-    telefono:       "0991-234567",
-    servicio:       "Módulo de compras e inventario",
-    valor_estimado: 22000000,
-    etapa:          "CONTACTADO",
-    proxima_accion:       "Enviar propuesta comercial",
-    fecha_proxima_accion: "2026-03-12",
-    creado_por:     "JUAN PÉREZ",
-    responsable:    "MARIA LOPEZ",
-    notas: [
-      {
-        id:    2,
-        texto: "Segunda llamada realizada. Muy interesados en el módulo de inventario.",
-        fecha: "2026-03-03T14:00:00.000Z",
-      },
-    ],
-    fecha_creacion:      "2026-02-20T10:00:00.000Z",
-    fecha_actualizacion: "2026-03-03T14:00:00.000Z",
-  },
-  {
-    id: 3,
-    numero_control: "CRM-000003",
-    empresa:        "DISTRIBUIDORA CENTRAL",
-    contacto:       "PEDRO SILVA",
-    email:          "pedro@distcentral.com",
-    telefono:       "0971-345678",
-    servicio:       "Sistema de facturación y CRM",
-    valor_estimado: 18000000,
-    etapa:          "NEGOCIACION",
-    proxima_accion:       "Revisar ajustes del contrato",
-    fecha_proxima_accion: "2026-03-11",
-    creado_por:     "MARIA LOPEZ",
-    responsable:    "MARIA LOPEZ",
-    notas: [],
-    fecha_creacion:      "2026-02-15T08:00:00.000Z",
-    fecha_actualizacion: "2026-03-05T16:00:00.000Z",
-  },
-  {
-    id: 4,
-    numero_control: "CRM-000004",
-    empresa:        "IMPORTADORA DEL SUR",
-    contacto:       "LAURA GÓMEZ",
-    email:          "lgomez@impsur.com",
-    telefono:       "0981-456789",
-    servicio:       "Módulo de ventas y gestión de clientes",
-    valor_estimado: 12000000,
-    etapa:          "GANADO",
-    proxima_accion:       "Inicio de implementación",
-    fecha_proxima_accion: "2026-03-15",
-    creado_por:     "JUAN PÉREZ",
-    responsable:    "JUAN PÉREZ",
-    notas: [
-      {
-        id:    3,
-        texto: "Contrato firmado. Inicio de implementación previsto para el 15/03.",
-        fecha: "2026-03-09T11:00:00.000Z",
-      },
-    ],
-    fecha_creacion:      "2026-02-01T08:00:00.000Z",
-    fecha_actualizacion: "2026-03-09T11:00:00.000Z",
-    cliente_creado: false,
-  },
-  {
-    id: 5,
-    numero_control: "CRM-000005",
-    empresa:        "SERVICIOS GLOBALES",
-    contacto:       "MIGUEL TORRES",
-    email:          "mtorres@serviciosglobales.com",
-    telefono:       "0961-567890",
-    servicio:       "Módulo de reportes y analytics",
-    valor_estimado: 8500000,
-    etapa:          "CONTACTADO",
-    proxima_accion:       "Demo del módulo de reportes",
-    fecha_proxima_accion: "2026-03-13",
-    creado_por:     "MARIA LOPEZ",
-    responsable:    "CARLOS VEGA",
-    notas: [],
-    fecha_creacion:      "2026-03-09T10:00:00.000Z",
-    fecha_actualizacion: "2026-03-09T10:00:00.000Z",
-  },
-];
-
-// ─── Clave de localStorage ────────────────────────────────────────────────────
-
-const KEY = "neura_crm";
-
-// ─── Helpers internos ─────────────────────────────────────────────────────────
-
-function safeGet<T>(key: string, fallback: T): T {
-  try {
-    const item = localStorage.getItem(key);
-    return item ? (JSON.parse(item) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+interface ProspectoRow {
+  id: string;
+  empresa_id: string;
+  numero_control: string;
+  empresa: string;
+  contacto: string;
+  email: string | null;
+  telefono: string | null;
+  servicio: string;
+  valor_estimado: number;
+  etapa: string;
+  proxima_accion: string | null;
+  fecha_proxima_accion: string | null;
+  creado_por: string | null;
+  responsable: string | null;
+  cliente_creado: boolean;
+  fecha_creacion: string;
+  fecha_actualizacion: string;
 }
 
-function safeSet(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // localStorage no disponible
-  }
+interface NotaRow {
+  id: string;
+  empresa_id: string;
+  prospecto_id: string;
+  texto: string;
+  fecha: string;
 }
 
-function generarNumeroControl(base: Prospecto[]): string {
-  const maxNum = base.reduce((max, p) => {
-    const match = p.numero_control?.match(/CRM-(\d+)/);
-    if (match) return Math.max(max, parseInt(match[1]));
-    return max;
-  }, 0);
-  return `CRM-${String(maxNum + 1).padStart(6, "0")}`;
-}
+// ─── Mapeo fila → tipo ────────────────────────────────────────────────────────
 
-/** Migra etapas obsoletas y devuelve la base actual (localStorage o mocks). */
-function getBase(): Prospecto[] {
-  const stored = safeGet<Prospecto[]>(KEY, []);
-  if (stored.length === 0) {
-    return PROSPECTOS_MOCK.map((p) => ({ ...p, notas: [...p.notas] }));
-  }
-  // Migrar etapa PROPUESTA → CONTACTADO si existiera en datos viejos
-  return stored.map((p) => ({
-    ...p,
-    etapa: (p.etapa as string) === "PROPUESTA" ? "CONTACTADO" : p.etapa,
-    notas: [...(p.notas ?? [])],
-  })) as Prospecto[];
-}
-
-// ─── API pública ──────────────────────────────────────────────────────────────
-
-export function getProspectos(): Prospecto[] {
-  return getBase();
-}
-
-export function getProspecto(id: number): Prospecto | undefined {
-  return getBase().find((p) => p.id === id);
-}
-
-export function saveProspecto(
-  datos: Omit<Prospecto, "id" | "numero_control" | "notas" | "fecha_creacion" | "fecha_actualizacion">
-): Prospecto {
-  const base  = getBase();
-  const nuevo: Prospecto = {
-    id:                  Date.now(),
-    numero_control:      generarNumeroControl(base),
-    notas:               [],
-    fecha_creacion:      new Date().toISOString(),
-    fecha_actualizacion: new Date().toISOString(),
-    ...datos,
+function rowToNota(row: NotaRow): Nota {
+  return {
+    id: row.id,
+    texto: row.texto,
+    fecha: row.fecha,
   };
-  safeSet(KEY, [...base, nuevo]);
-  return nuevo;
 }
 
-export function updateProspecto(
-  id: number,
-  datos: Partial<Omit<Prospecto, "id" | "numero_control" | "fecha_creacion">>
-): Prospecto | null {
-  const base = getBase();
-  const idx  = base.findIndex((p) => p.id === id);
-  if (idx === -1) return null;
-
-  const updated: Prospecto = {
-    ...base[idx],
-    ...datos,
-    fecha_actualizacion: new Date().toISOString(),
+function rowToProspecto(row: ProspectoRow, notas: Nota[]): Prospecto {
+  return {
+    id: row.id,
+    numero_control: row.numero_control,
+    empresa: row.empresa,
+    contacto: row.contacto,
+    email: row.email ?? undefined,
+    telefono: row.telefono ?? undefined,
+    servicio: row.servicio,
+    valor_estimado: Number(row.valor_estimado),
+    etapa: row.etapa as EtapaFunnel,
+    proxima_accion: row.proxima_accion ?? undefined,
+    fecha_proxima_accion: row.fecha_proxima_accion ?? undefined,
+    creado_por: row.creado_por ?? undefined,
+    responsable: row.responsable ?? undefined,
+    notas,
+    fecha_creacion: row.fecha_creacion,
+    fecha_actualizacion: row.fecha_actualizacion,
+    cliente_creado: row.cliente_creado,
   };
-  base[idx] = updated;
-  safeSet(KEY, base);
-  return updated;
 }
 
-/** Mueve un prospecto a una nueva etapa. */
-export function moveProspecto(id: number, etapa: EtapaFunnel): void {
-  updateProspecto(id, { etapa });
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function generarNumeroControl(): Promise<string> {
+  const { data } = await supabase
+    .from("crm_prospectos")
+    .select("numero_control")
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const last = data?.[0] as { numero_control?: string } | undefined;
+  const match = last?.numero_control?.match(/CRM-(\d+)/);
+  const next = (parseInt(match?.[1] ?? "0") + 1);
+  return `CRM-${String(next).padStart(6, "0")}`;
 }
 
-/** Agrega una nota interna al prospecto. */
-export function addNota(prospectoId: number, texto: string): Nota | null {
-  const base = getBase();
-  const idx  = base.findIndex((p) => p.id === prospectoId);
-  if (idx === -1) return null;
+// ─── Prospectos ────────────────────────────────────────────────────────────────
 
-  const nota: Nota = {
-    id:    Date.now(),
+/** Lista prospectos con sus notas. RLS filtra por empresa. */
+export async function getProspectos(): Promise<Prospecto[]> {
+  const { data: prospectosData, error: errP } = await supabase
+    .from("crm_prospectos")
+    .select("*")
+    .order("fecha_creacion", { ascending: false });
+
+  if (errP) {
+    console.error("[crm] getProspectos:", errP.message);
+    return [];
+  }
+
+  const prospectos = prospectosData as ProspectoRow[];
+  if (prospectos.length === 0) return [];
+
+  const ids = prospectos.map((p) => p.id);
+  const { data: notasData, error: errN } = await supabase
+    .from("crm_notas")
+    .select("*")
+    .in("prospecto_id", ids)
+    .order("fecha", { ascending: false });
+
+  if (errN) {
+    console.error("[crm] getProspectos (notas):", errN.message);
+  }
+
+  const notasRows = (notasData as NotaRow[]) ?? [];
+  const notasPorProspecto = notasRows.reduce<Record<string, Nota[]>>((acc, n) => {
+    if (!acc[n.prospecto_id]) acc[n.prospecto_id] = [];
+    acc[n.prospecto_id].unshift(rowToNota(n));
+    return acc;
+  }, {});
+
+  return prospectos.map((p) =>
+    rowToProspecto(p, notasPorProspecto[p.id] ?? [])
+  );
+}
+
+/** Obtiene un prospecto por ID con sus notas. */
+export async function getProspecto(id: string): Promise<Prospecto | null> {
+  const { data: pData, error: errP } = await supabase
+    .from("crm_prospectos")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (errP || !pData) {
+    console.error("[crm] getProspecto:", errP?.message);
+    return null;
+  }
+
+  const { data: notasData } = await supabase
+    .from("crm_notas")
+    .select("*")
+    .eq("prospecto_id", id)
+    .order("fecha", { ascending: false });
+
+  const notas = ((notasData as NotaRow[]) ?? []).map(rowToNota);
+  return rowToProspecto(pData as ProspectoRow, notas);
+}
+
+export type NuevoProspectoData = Omit<
+  Prospecto,
+  "id" | "numero_control" | "notas" | "fecha_creacion" | "fecha_actualizacion"
+>;
+
+/** Crea prospecto. empresa_id desde getCurrentUser(). */
+export async function saveProspecto(
+  datos: NuevoProspectoData
+): Promise<Prospecto | null> {
+  const usuario = await getCurrentUser();
+  if (!usuario?.empresa_id) throw new Error("Usuario no autenticado o sin empresa");
+
+  const numeroControl = await generarNumeroControl();
+
+  const insert = {
+    empresa_id: usuario.empresa_id,
+    numero_control: numeroControl,
+    empresa: datos.empresa,
+    contacto: datos.contacto,
+    email: datos.email ?? null,
+    telefono: datos.telefono ?? null,
+    servicio: datos.servicio,
+    valor_estimado: datos.valor_estimado ?? 0,
+    etapa: datos.etapa ?? "LEAD",
+    proxima_accion: datos.proxima_accion ?? null,
+    fecha_proxima_accion: datos.fecha_proxima_accion ?? null,
+    creado_por: datos.creado_por ?? null,
+    responsable: datos.responsable ?? null,
+  };
+
+  const { data, error } = await supabase
+    .from("crm_prospectos")
+    .insert([insert])
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[crm] saveProspecto:", error.message);
+    return null;
+  }
+
+  return rowToProspecto(data as ProspectoRow, []);
+}
+
+/** Actualiza prospecto. */
+export async function updateProspecto(
+  id: string,
+  datos: Partial<Omit<Prospecto, "id" | "numero_control" | "notas" | "fecha_creacion">>
+): Promise<Prospecto | null> {
+  const patch: Record<string, unknown> = {};
+  if (datos.empresa !== undefined) patch.empresa = datos.empresa;
+  if (datos.contacto !== undefined) patch.contacto = datos.contacto;
+  if (datos.email !== undefined) patch.email = datos.email ?? null;
+  if (datos.telefono !== undefined) patch.telefono = datos.telefono ?? null;
+  if (datos.servicio !== undefined) patch.servicio = datos.servicio;
+  if (datos.valor_estimado !== undefined) patch.valor_estimado = datos.valor_estimado;
+  if (datos.etapa !== undefined) patch.etapa = datos.etapa;
+  if (datos.proxima_accion !== undefined) patch.proxima_accion = datos.proxima_accion ?? null;
+  if (datos.fecha_proxima_accion !== undefined) patch.fecha_proxima_accion = datos.fecha_proxima_accion ?? null;
+  if (datos.creado_por !== undefined) patch.creado_por = datos.creado_por ?? null;
+  if (datos.responsable !== undefined) patch.responsable = datos.responsable ?? null;
+  if (datos.cliente_creado !== undefined) patch.cliente_creado = datos.cliente_creado;
+
+  const { data, error } = await supabase
+    .from("crm_prospectos")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[crm] updateProspecto:", error.message);
+    return null;
+  }
+
+  const prospecto = await getProspecto(id);
+  return prospecto;
+}
+
+/** Cambia la etapa del prospecto. */
+export async function moveProspecto(
+  id: string,
+  etapa: EtapaFunnel
+): Promise<void> {
+  await updateProspecto(id, { etapa });
+}
+
+// ─── Notas ─────────────────────────────────────────────────────────────────────
+
+/** Agrega una nota al prospecto. */
+export async function addNota(
+  prospectoId: string,
+  texto: string
+): Promise<Nota | null> {
+  const usuario = await getCurrentUser();
+  if (!usuario?.empresa_id) throw new Error("Usuario no autenticado o sin empresa");
+
+  const insert = {
+    empresa_id: usuario.empresa_id,
+    prospecto_id: prospectoId,
     texto: texto.trim(),
-    fecha: new Date().toISOString(),
   };
 
-  base[idx] = {
-    ...base[idx],
-    notas:               [...(base[idx].notas ?? []), nota],
-    fecha_actualizacion: new Date().toISOString(),
-  };
-  safeSet(KEY, base);
-  return nota;
+  const { data, error } = await supabase
+    .from("crm_notas")
+    .insert([insert])
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[crm] addNota:", error.message);
+    return null;
+  }
+
+  return rowToNota(data as NotaRow);
 }
 
-/** Elimina un prospecto por ID. */
-export function deleteProspecto(id: number): void {
-  const base = getBase().filter((p) => p.id !== id);
-  safeSet(KEY, base);
+/** Elimina un prospecto (y sus notas por CASCADE). */
+export async function deleteProspecto(id: string): Promise<void> {
+  const { error } = await supabase.from("crm_prospectos").delete().eq("id", id);
+  if (error) console.error("[crm] deleteProspecto:", error.message);
 }

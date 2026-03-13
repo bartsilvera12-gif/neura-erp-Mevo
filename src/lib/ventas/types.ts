@@ -4,7 +4,7 @@ export type MonedaVenta = "GS" | "USD";
 
 /** Un ítem dentro de una venta (una línea de producto). */
 export interface LineaVenta {
-  producto_id:           number;
+  producto_id:           string;
   producto_nombre:       string;
   sku:                   string;
   cantidad:              number;

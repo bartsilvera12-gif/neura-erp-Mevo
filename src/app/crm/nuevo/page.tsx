@@ -58,7 +58,7 @@ export default function NuevoProspectoPage() {
     }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -68,7 +68,7 @@ export default function NuevoProspectoPage() {
 
     const valorNum = parseFloat(form.valor_estimado) || 0;
 
-    saveProspecto({
+    const guardado = await saveProspecto({
       empresa:              form.empresa.trim().toUpperCase(),
       contacto:             form.contacto.trim().toUpperCase(),
       email:                form.email.trim()    || undefined,
@@ -82,7 +82,7 @@ export default function NuevoProspectoPage() {
       creado_por:           form.creado_por.trim().toUpperCase()  || undefined,
     });
 
-    router.push("/crm");
+    if (guardado) router.push("/crm");
   }
 
   return (

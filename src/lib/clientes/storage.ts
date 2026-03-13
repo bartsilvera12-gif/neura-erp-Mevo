@@ -3,68 +3,106 @@ import { getCurrentUser } from "@/lib/auth";
 import type { Cliente, EstadoCliente, NotaCliente } from "./types";
 
 // ─── Tipo de fila Supabase ────────────────────────────────────────────────────
-// Columnas actuales: id (uuid), empresa_id (uuid), nombre, telefono, email,
-//                   direccion, created_at
-
+// RLS maneja empresa_id automáticamente; no filtrar manualmente en SELECT
 interface SupabaseRow {
-  id:          string;
-  nombre:      string | null;
-  telefono:    string | null;
-  email:       string | null;
-  direccion:   string | null;
-  created_at:  string | null;
+  id:                 string;
+  empresa_id:         string | null;
+  tipo_cliente:       string | null;
+  empresa:            string | null;
+  nombre:             string | null;
+  nombre_contacto:    string | null;
+  ruc:                string | null;
+  documento:          string | null;
+  telefono:           string | null;
+  telefono_secundario: string | null;
+  email:              string | null;
+  email_secundario:   string | null;
+  direccion:          string | null;
+  ciudad:             string | null;
+  pais:               string | null;
+  sitio_web:          string | null;
+  instagram:          string | null;
+  linkedin:           string | null;
+  categoria_cliente:  string | null;
+  industria:          string | null;
+  valor_cliente:      number | null;
+  condicion_pago:     string | null;
+  moneda_preferida:   string | null;
+  vendedor_asignado:  string | null;
+  origen:             string | null;
+  prospecto_id:       number | null;
+  estado:             string | null;
+  notas:              unknown;
+  created_at:         string | null;
+  updated_at:         string | null;
 }
 
 // ─── Mapping fila → Cliente ───────────────────────────────────────────────────
 
+function parseNotas(notas: unknown): NotaCliente[] {
+  if (!Array.isArray(notas)) return [];
+  return notas
+    .filter((n): n is { id?: number; texto?: string; fecha?: string } => n && typeof n === "object")
+    .map((n) => ({
+      id:    typeof n.id === "number" ? n.id : Date.now(),
+      texto: typeof n.texto === "string" ? n.texto : "",
+      fecha: typeof n.fecha === "string" ? n.fecha : new Date().toISOString(),
+    }));
+}
+
 function rowToCliente(row: SupabaseRow): Cliente {
+  const nombreContacto = row.nombre_contacto ?? row.nombre ?? "";
   const now = new Date().toISOString();
   return {
-    id:              row.id,
-    codigo_cliente:  `CL-${row.id.slice(0, 6).toUpperCase()}`,
-    tipo_cliente:    "empresa",
-    nombre_contacto: row.nombre    ?? "",
-    telefono:        row.telefono  ?? undefined,
-    email:           row.email     ?? undefined,
-    direccion:       row.direccion ?? undefined,
-    origen:          "MANUAL",
-    estado:          "activo",
-    notas:           getNotasCliente(row.id),
-    created_at:      row.created_at ?? now,
-    updated_at:      row.created_at ?? now,
+    id:                  row.id,
+    codigo_cliente:      `CL-${row.id.slice(0, 8).toUpperCase()}`,
+    tipo_cliente:        (row.tipo_cliente === "persona" ? "persona" : "empresa") as Cliente["tipo_cliente"],
+    empresa:             row.empresa ?? undefined,
+    nombre_contacto:     nombreContacto,
+    ruc:                 row.ruc ?? undefined,
+    documento:           row.documento ?? undefined,
+    telefono:            row.telefono ?? undefined,
+    telefono_secundario: row.telefono_secundario ?? undefined,
+    email:               row.email ?? undefined,
+    email_secundario:    row.email_secundario ?? undefined,
+    direccion:           row.direccion ?? undefined,
+    ciudad:              row.ciudad ?? undefined,
+    pais:                row.pais ?? undefined,
+    sitio_web:           row.sitio_web ?? undefined,
+    instagram:           row.instagram ?? undefined,
+    linkedin:            row.linkedin ?? undefined,
+    categoria_cliente:   row.categoria_cliente ?? undefined,
+    industria:           row.industria ?? undefined,
+    valor_cliente:       row.valor_cliente ?? undefined,
+    condicion_pago:      row.condicion_pago ?? undefined,
+    moneda_preferida:    (row.moneda_preferida === "USD" ? "USD" : "GS") as "GS" | "USD",
+    vendedor_asignado:   row.vendedor_asignado ?? undefined,
+    origen:              (row.origen as Cliente["origen"]) ?? "MANUAL",
+    prospecto_id:        row.prospecto_id ?? undefined,
+    estado:              (row.estado === "inactivo" ? "inactivo" : "activo") as EstadoCliente,
+    notas:               parseNotas(row.notas),
+    created_at:          row.created_at ?? now,
+    updated_at:          row.updated_at ?? row.created_at ?? now,
   };
-}
-
-// ─── Notas (localStorage, indexadas por id de cliente) ───────────────────────
-
-export function getNotasCliente(clienteId: string): NotaCliente[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(`neura_notas_${clienteId}`) ?? "[]") as NotaCliente[];
-  } catch { return []; }
-}
-
-function saveNotasCliente(clienteId: string, notas: NotaCliente[]): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(`neura_notas_${clienteId}`, JSON.stringify(notas));
 }
 
 // ─── API pública ──────────────────────────────────────────────────────────────
 
+/** Lista clientes. RLS filtra por empresa automáticamente. */
 export async function getClientes(): Promise<Cliente[]> {
-  const usuario = await getCurrentUser();
-  if (!usuario) throw new Error("Usuario no autenticado");
-
   const { data, error } = await supabase
     .from("clientes")
     .select("*")
-    .eq("empresa_id", usuario.empresa_id)
     .order("created_at", { ascending: false });
 
-  if (error) { console.error("[clientes] getClientes:", error.message); return []; }
+  if (error) {
+    console.error("[clientes] getClientes:", error.message);
+    return [];
+  }
   return (data as SupabaseRow[]).map(rowToCliente);
 }
 
+/** Obtiene un cliente por ID. RLS filtra por empresa. */
 export async function getCliente(id: string): Promise<Cliente | null> {
   const { data, error } = await supabase
     .from("clientes")
@@ -72,7 +110,10 @@ export async function getCliente(id: string): Promise<Cliente | null> {
     .eq("id", id)
     .single();
 
-  if (error) { console.error("[clientes] getCliente:", error.message); return null; }
+  if (error) {
+    console.error("[clientes] getCliente:", error.message);
+    return null;
+  }
   return rowToCliente(data as SupabaseRow);
 }
 
@@ -87,35 +128,85 @@ export type NuevoClienteData = Omit<
   "id" | "codigo_cliente" | "notas" | "created_at" | "updated_at"
 >;
 
+/** Crea cliente. empresa_id se obtiene del usuario; RLS valida acceso. */
 export async function saveCliente(datos: NuevoClienteData): Promise<Cliente | null> {
   const usuario = await getCurrentUser();
-  if (!usuario) throw new Error("Usuario no autenticado");
+  if (!usuario?.empresa_id) throw new Error("Usuario no autenticado o sin empresa");
+
+  const insert: Record<string, unknown> = {
+    empresa_id:         usuario.empresa_id,
+    tipo_cliente:       datos.tipo_cliente ?? "empresa",
+    empresa:            datos.empresa ?? null,
+    nombre:             datos.nombre_contacto ?? null,
+    nombre_contacto:    datos.nombre_contacto ?? null,
+    ruc:                datos.ruc ?? null,
+    documento:          datos.documento ?? null,
+    telefono:           datos.telefono ?? null,
+    telefono_secundario: datos.telefono_secundario ?? null,
+    email:              datos.email ?? null,
+    email_secundario:   datos.email_secundario ?? null,
+    direccion:          datos.direccion ?? null,
+    ciudad:             datos.ciudad ?? null,
+    pais:               datos.pais ?? null,
+    sitio_web:          datos.sitio_web ?? null,
+    instagram:          datos.instagram ?? null,
+    linkedin:           datos.linkedin ?? null,
+    categoria_cliente:   datos.categoria_cliente ?? null,
+    industria:          datos.industria ?? null,
+    valor_cliente:      datos.valor_cliente ?? null,
+    condicion_pago:     datos.condicion_pago ?? null,
+    moneda_preferida:   datos.moneda_preferida ?? "GS",
+    vendedor_asignado:  datos.vendedor_asignado ?? null,
+    origen:             datos.origen ?? "MANUAL",
+    prospecto_id:       datos.prospecto_id ?? null,
+    estado:             datos.estado ?? "activo",
+  };
 
   const { data, error } = await supabase
     .from("clientes")
-    .insert([{
-      empresa_id: usuario.empresa_id,
-      nombre:     datos.nombre_contacto            || null,
-      telefono:   datos.telefono                   || null,
-      email:      datos.email                      || null,
-      direccion:  datos.direccion                  || null,
-    }])
+    .insert([insert])
     .select()
     .single();
 
-  if (error) { console.error("[clientes] saveCliente:", error.message); return null; }
+  if (error) {
+    console.error("[clientes] saveCliente:", error.message);
+    return null;
+  }
   return rowToCliente(data as SupabaseRow);
 }
 
+/** Actualiza cliente. RLS valida que pertenezca a la empresa del usuario. */
 export async function updateCliente(
   id: string,
   datos: Partial<Omit<Cliente, "id" | "codigo_cliente" | "created_at">>
 ): Promise<Cliente | null> {
-  const patch: Partial<SupabaseRow> = {};
-  if (datos.nombre_contacto !== undefined) patch.nombre    = datos.nombre_contacto || null;
-  if (datos.telefono        !== undefined) patch.telefono  = datos.telefono        || null;
-  if (datos.email           !== undefined) patch.email     = datos.email           || null;
-  if (datos.direccion       !== undefined) patch.direccion = datos.direccion       || null;
+  const patch: Record<string, unknown> = {};
+  if (datos.tipo_cliente !== undefined) patch.tipo_cliente = datos.tipo_cliente;
+  if (datos.empresa !== undefined) patch.empresa = datos.empresa ?? null;
+  if (datos.nombre_contacto !== undefined) {
+    patch.nombre = datos.nombre_contacto ?? null;
+    patch.nombre_contacto = datos.nombre_contacto ?? null;
+  }
+  if (datos.ruc !== undefined) patch.ruc = datos.ruc ?? null;
+  if (datos.documento !== undefined) patch.documento = datos.documento ?? null;
+  if (datos.telefono !== undefined) patch.telefono = datos.telefono ?? null;
+  if (datos.telefono_secundario !== undefined) patch.telefono_secundario = datos.telefono_secundario ?? null;
+  if (datos.email !== undefined) patch.email = datos.email ?? null;
+  if (datos.email_secundario !== undefined) patch.email_secundario = datos.email_secundario ?? null;
+  if (datos.direccion !== undefined) patch.direccion = datos.direccion ?? null;
+  if (datos.ciudad !== undefined) patch.ciudad = datos.ciudad ?? null;
+  if (datos.pais !== undefined) patch.pais = datos.pais ?? null;
+  if (datos.sitio_web !== undefined) patch.sitio_web = datos.sitio_web ?? null;
+  if (datos.instagram !== undefined) patch.instagram = datos.instagram ?? null;
+  if (datos.linkedin !== undefined) patch.linkedin = datos.linkedin ?? null;
+  if (datos.categoria_cliente !== undefined) patch.categoria_cliente = datos.categoria_cliente ?? null;
+  if (datos.industria !== undefined) patch.industria = datos.industria ?? null;
+  if (datos.valor_cliente !== undefined) patch.valor_cliente = datos.valor_cliente ?? null;
+  if (datos.condicion_pago !== undefined) patch.condicion_pago = datos.condicion_pago ?? null;
+  if (datos.moneda_preferida !== undefined) patch.moneda_preferida = datos.moneda_preferida ?? null;
+  if (datos.vendedor_asignado !== undefined) patch.vendedor_asignado = datos.vendedor_asignado ?? null;
+  if (datos.estado !== undefined) patch.estado = datos.estado ?? null;
+  patch.updated_at = new Date().toISOString();
 
   const { data, error } = await supabase
     .from("clientes")
@@ -124,23 +215,49 @@ export async function updateCliente(
     .select()
     .single();
 
-  if (error) { console.error("[clientes] updateCliente:", error.message); return null; }
+  if (error) {
+    console.error("[clientes] updateCliente:", error.message);
+    return null;
+  }
   return rowToCliente(data as SupabaseRow);
 }
 
+/** Elimina cliente. RLS valida que pertenezca a la empresa del usuario. */
 export async function deleteCliente(id: string): Promise<void> {
   const { error } = await supabase.from("clientes").delete().eq("id", id);
   if (error) console.error("[clientes] deleteCliente:", error.message);
 }
 
-export function addNotaCliente(clienteId: string, texto: string): NotaCliente {
+// ─── Notas (persistidas en Supabase, columna notas jsonb) ────────────────────
+
+/** Obtiene notas del cliente desde Supabase. Fallback a [] si no hay datos. */
+export async function getNotasCliente(clienteId: string): Promise<NotaCliente[]> {
+  const { data, error } = await supabase
+    .from("clientes")
+    .select("notas")
+    .eq("id", clienteId)
+    .single();
+
+  if (error || !data) return [];
+  return parseNotas((data as { notas: unknown }).notas);
+}
+
+/** Añade una nota al cliente y persiste en Supabase. */
+export async function addNotaCliente(clienteId: string, texto: string): Promise<NotaCliente> {
+  const notas = await getNotasCliente(clienteId);
   const nota: NotaCliente = {
     id:    Date.now(),
     texto: texto.trim(),
     fecha: new Date().toISOString(),
   };
-  const notas = getNotasCliente(clienteId);
-  saveNotasCliente(clienteId, [...notas, nota]);
+  const nuevas = [...notas, nota];
+
+  const { error } = await supabase
+    .from("clientes")
+    .update({ notas: nuevas, updated_at: new Date().toISOString() })
+    .eq("id", clienteId);
+
+  if (error) console.error("[clientes] addNotaCliente:", error.message);
   return nota;
 }
 

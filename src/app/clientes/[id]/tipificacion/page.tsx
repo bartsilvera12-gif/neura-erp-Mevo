@@ -60,7 +60,7 @@ export default function TipificacionPage() {
   const params = useParams();
   const router = useRouter();
   if (!params) return null;
-  const id = parseInt(params.id as string);
+  const id = params.id as string;
 
   const [cliente,        setCliente]        = useState<Cliente | null>(null);
   const [notFound,       setNotFound]       = useState(false);
@@ -80,16 +80,15 @@ export default function TipificacionPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function cargar() {
-    const c = await getCliente(String(id));
+    const c = await getCliente(id);
     if (!c) { setNotFound(true); return; }
     setCliente(c);
-    const tips = getTipificaciones(id);
-    // Ordenar más recientes primero
-    setTipificaciones([...tips].sort((a, b) => b.fecha.localeCompare(a.fecha)));
+    const tips = await getTipificaciones(id);
+    setTipificaciones(tips);
   }
 
   useEffect(() => {
-    if (!isNaN(id)) void cargar();
+    if (id) void cargar();
     else setNotFound(true);
   }, [id]);
 
@@ -102,7 +101,7 @@ export default function TipificacionPage() {
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
-  function handleGuardar(e: React.FormEvent) {
+  async function handleGuardar(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setExito(false);
@@ -111,7 +110,7 @@ export default function TipificacionPage() {
       return setError("La observación es obligatoria.");
     }
 
-    saveTipificacion({
+    const guardado = await saveTipificacion({
       cliente_id:   id,
       usuario:      USUARIO_DEFAULT,
       tipo_gestion: form.tipo_gestion,
@@ -119,10 +118,14 @@ export default function TipificacionPage() {
       observacion:  form.observacion.trim(),
     });
 
-    setForm({ tipo_gestion: "Consulta", resultado: "Pendiente", observacion: "" });
-    setExito(true);
-    cargar();
-    setTimeout(() => setExito(false), 3000);
+    if (guardado) {
+      setForm({ tipo_gestion: "Consulta", resultado: "Pendiente", observacion: "" });
+      setExito(true);
+      cargar();
+      setTimeout(() => setExito(false), 3000);
+    } else {
+      setError("Error al guardar la tipificación.");
+    }
   }
 
   if (notFound) {
