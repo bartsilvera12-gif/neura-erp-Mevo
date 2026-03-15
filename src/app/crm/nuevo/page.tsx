@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { saveProspecto } from "@/lib/crm/storage";
+import { getProspectos, saveProspecto } from "@/lib/crm/storage";
 import { getEtapas } from "@/lib/crm/etapas";
 import { getCurrentUser } from "@/lib/auth";
 import { getPlanes } from "@/lib/planes/storage";
 import PlanSelector from "@/components/crm/PlanSelector";
+import { cleanTelefono, formatTelefonoDisplay, isValidTelefono } from "@/lib/telefono";
 import type { EtapaCrm } from "@/lib/crm/etapas";
 import type { Plan } from "@/lib/planes/types";
 
@@ -47,6 +48,7 @@ export default function NuevoProspectoPage() {
   const [etapas, setEtapas] = useState<EtapaCrm[]>([]);
   const [cargandoPlanes, setCargandoPlanes] = useState(true);
   const [usuarioActual, setUsuarioActual] = useState<{ nombre?: string; email?: string } | null>(null);
+  const [telefonosHistorial, setTelefonosHistorial] = useState<string[]>([]);
 
   useEffect(() => {
     getPlanes()
@@ -71,11 +73,25 @@ export default function NuevoProspectoPage() {
       .catch(() => setUsuarioActual(null));
   }, []);
 
+  useEffect(() => {
+    getProspectos()
+      .then((ps) => {
+        const tels = [...new Set(ps.map((p) => cleanTelefono(p.telefono ?? "")).filter((t) => t.length === 10))];
+        setTelefonosHistorial(tels);
+      })
+      .catch(() => setTelefonosHistorial([]));
+  }, []);
+
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) {
     setError(null);
     const { name, value } = e.target;
+    if (name === "telefono") {
+      const raw = cleanTelefono(value);
+      setForm((prev) => ({ ...prev, telefono: raw }));
+      return;
+    }
     const upper = ["empresa", "contacto", "responsable"];
     setForm((prev) => ({
       ...prev,
@@ -110,12 +126,17 @@ export default function NuevoProspectoPage() {
     if (!form.contacto.trim())  return setError("El contacto es obligatorio.");
     if (form.planIds.length === 0) return setError("Seleccioná al menos un servicio/plan.");
     if (!form.etapa) return setError("Seleccioná una etapa.");
+    if (form.telefono && !isValidTelefono(form.telefono)) {
+      return setError("El número debe tener formato 0980000000 (10 dígitos, comenzando con 09).");
+    }
+
+    const telefonoGuardar = form.telefono ? cleanTelefono(form.telefono) : undefined;
 
     const guardado = await saveProspecto({
       empresa:              form.empresa.trim().toUpperCase(),
       contacto:             form.contacto.trim().toUpperCase(),
       email:                form.email.trim()    || undefined,
-      telefono:             form.telefono.trim() || undefined,
+      telefono:             telefonoGuardar,
       servicio:             servicioTexto,
       valor_estimado:       valorEstimado,
       etapa:                form.etapa,
@@ -177,11 +198,20 @@ export default function NuevoProspectoPage() {
                 <input
                   type="text"
                   name="telefono"
-                  value={form.telefono}
+                  value={formatTelefonoDisplay(form.telefono)}
                   onChange={handleChange}
-                  placeholder="Ej: 0981-123456"
+                  placeholder="0981 100 453"
                   className={inputClass}
+                  autoComplete="off"
+                  list="telefono-sugerencias"
+                  inputMode="numeric"
+                  maxLength={12}
                 />
+                <datalist id="telefono-sugerencias">
+                  {telefonosHistorial.map((t) => (
+                    <option key={t} value={formatTelefonoDisplay(t)} />
+                  ))}
+                </datalist>
               </div>
             </div>
 
