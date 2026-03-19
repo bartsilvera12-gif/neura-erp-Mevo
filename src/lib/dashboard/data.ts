@@ -1,6 +1,5 @@
 import { supabase } from "@/lib/supabase";
 import { getProspectos } from "@/lib/crm/storage";
-import { getCurrentUser } from "@/lib/auth";
 
 // ── Tipos de salida (estructura esperada por el Dashboard en page.tsx) ────────
 
@@ -164,17 +163,10 @@ async function fetchProspectos(): Promise<ProspectoRaw[]> {
 
 /**
  * Obtiene todos los datos necesarios para el Dashboard desde Supabase.
- * Filtra por empresa_id cuando el usuario tiene uno (evita que super_admin sume todas las empresas).
+ * RLS filtra por empresa_id automáticamente según el usuario autenticado.
  */
 export async function getDashboardData(): Promise<DashboardData> {
   const prospectos = await fetchProspectos();
-  const usuario = await getCurrentUser();
-  let empresaId = usuario?.empresa_id ?? null;
-  // Super_admin sin empresa_id: usar la primera empresa para evitar sumar todas (450B)
-  if (!empresaId) {
-    const { data: primera } = await supabase.from("empresas").select("id").limit(1).maybeSingle();
-    empresaId = primera?.id ?? null;
-  }
 
   let clientes: ClienteRaw[] = [];
   let facturas: FacturaRaw[] = [];
@@ -185,21 +177,18 @@ export async function getDashboardData(): Promise<DashboardData> {
   let compras: CompraRaw[] = [];
   let gastos: GastoRaw[] = [];
 
-  const eqEmpresa = (q: ReturnType<typeof supabase.from>) =>
-    empresaId ? (q as any).eq("empresa_id", empresaId) : q;
-
   try {
     const [clientesQ, facturasQ, pagosQ, tipificacionesQ, productosQ, ventasQ, ventasItemsQ, comprasQ, gastosQ] =
       await Promise.all([
-        eqEmpresa(supabase.from("clientes")).select("*"),
-        eqEmpresa(supabase.from("facturas")).select("*"),
-        eqEmpresa(supabase.from("pagos")).select("id, factura_id, monto, fecha_pago"),
-        eqEmpresa(supabase.from("tipificaciones")).select("*"),
-        eqEmpresa(supabase.from("productos")).select("*"),
-        eqEmpresa(supabase.from("ventas")).select("*"),
-        eqEmpresa(supabase.from("ventas_items")).select("*"),
-        eqEmpresa(supabase.from("compras")).select("*"),
-        eqEmpresa(supabase.from("gastos")).select("id, monto, fecha"),
+        supabase.from("clientes").select("*"),
+        supabase.from("facturas").select("*"),
+        supabase.from("pagos").select("id, factura_id, monto, fecha_pago"),
+        supabase.from("tipificaciones").select("*"),
+        supabase.from("productos").select("*"),
+        supabase.from("ventas").select("*"),
+        supabase.from("ventas_items").select("*"),
+        supabase.from("compras").select("*"),
+        supabase.from("gastos").select("id, monto, fecha"),
       ]);
 
     if (clientesQ.error) throw new Error(clientesQ.error.message);
