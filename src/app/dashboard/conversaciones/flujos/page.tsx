@@ -29,8 +29,11 @@ function fmt(iso: string) {
 export default function FlowsListPage() {
   const [rows, setRows] = useState<FlowRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [togglingCode, setTogglingCode] = useState<string | null>(null);
+  const [duplicatingCode, setDuplicatingCode] = useState<string | null>(null);
   const [newCode, setNewCode] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [duplicateFrom, setDuplicateFrom] = useState("");
@@ -47,6 +50,7 @@ export default function FlowsListPage() {
       if (!res.ok || !json.ok) throw new Error(json.error ?? "Error al cargar flujos");
       setRows(json.items ?? []);
       setError(null);
+      setSuccess(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar flujos");
     } finally {
@@ -60,17 +64,22 @@ export default function FlowsListPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!newCode.trim()) return;
+    const flowCode = newCode.trim();
+    if (!flowCode) {
+      setError("Ingresá un flow_code para crear el flujo.");
+      return;
+    }
     setCreating(true);
     setError(null);
+    setSuccess(null);
     try {
       const res = await fetch("/api/chat/flows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         body: JSON.stringify({
-          flow_code: newCode.trim(),
-          label: newLabel.trim() || newCode.trim(),
+          flow_code: flowCode,
+          label: newLabel.trim() || flowCode,
           duplicate_from: duplicateFrom.trim() || undefined,
         }),
       });
@@ -80,6 +89,7 @@ export default function FlowsListPage() {
       setNewLabel("");
       setDuplicateFrom("");
       await reload();
+      setSuccess(`Flujo ${flowCode} creado correctamente.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al crear flujo");
     } finally {
@@ -88,6 +98,9 @@ export default function FlowsListPage() {
   }
 
   async function toggleFlow(flowCode: string, activo: boolean) {
+    setTogglingCode(flowCode);
+    setError(null);
+    setSuccess(null);
     try {
       const res = await fetch(`/api/chat/flows/${encodeURIComponent(flowCode)}`, {
         method: "PATCH",
@@ -98,8 +111,40 @@ export default function FlowsListPage() {
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || !json.ok) throw new Error(json.error ?? "No se pudo actualizar estado");
       await reload();
+      setSuccess(`Flujo ${flowCode} ${activo ? "desactivado" : "activado"} correctamente.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al actualizar estado");
+    } finally {
+      setTogglingCode(null);
+    }
+  }
+
+  async function duplicateFlow(sourceFlowCode: string) {
+    const suggested = `${sourceFlowCode}_copy`;
+    const newFlowCode = prompt("Nuevo flow_code para duplicar:", suggested)?.trim() || "";
+    if (!newFlowCode) return;
+    setDuplicatingCode(sourceFlowCode);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch("/api/chat/flows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          flow_code: newFlowCode,
+          label: `${newFlowCode}`,
+          duplicate_from: sourceFlowCode,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !json.ok) throw new Error(json.error ?? "No se pudo duplicar flujo");
+      await reload();
+      setSuccess(`Flujo ${sourceFlowCode} duplicado como ${newFlowCode}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al duplicar flujo");
+    } finally {
+      setDuplicatingCode(null);
     }
   }
 
@@ -119,12 +164,14 @@ export default function FlowsListPage() {
       </div>
 
       {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
+      {success && <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2">{success}</div>}
 
       <form onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
         <input
           className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
           placeholder="flow_code (ej: sorteo_default)"
           value={newCode}
+          required
           onChange={(e) => setNewCode(e.target.value)}
         />
         <input
@@ -183,19 +230,16 @@ export default function FlowsListPage() {
                       <Link href={`/dashboard/conversaciones/flujos/${encodeURIComponent(r.flow_code)}`} className="text-[#0EA5E9] hover:underline">
                         Editar
                       </Link>
-                      <button type="button" onClick={() => void toggleFlow(r.flow_code, r.activo)} className="text-slate-600 hover:underline">
-                        {r.activo ? "Desactivar" : "Activar"}
+                      <button type="button" onClick={() => void toggleFlow(r.flow_code, r.activo)} className="text-slate-600 hover:underline" disabled={togglingCode === r.flow_code}>
+                        {togglingCode === r.flow_code ? "..." : r.activo ? "Desactivar" : "Activar"}
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setDuplicateFrom(r.flow_code);
-                          setNewCode(`${r.flow_code}_copy`);
-                          setNewLabel(`${r.label || r.flow_code} (copia)`);
-                        }}
+                        onClick={() => void duplicateFlow(r.flow_code)}
                         className="text-slate-600 hover:underline"
+                        disabled={duplicatingCode === r.flow_code}
                       >
-                        Duplicar
+                        {duplicatingCode === r.flow_code ? "..." : "Duplicar"}
                       </button>
                     </td>
                   </tr>
