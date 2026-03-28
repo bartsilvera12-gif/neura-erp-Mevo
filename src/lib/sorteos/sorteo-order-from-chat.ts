@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { empresaTieneModuloSorteos } from "@/lib/sorteos/raffles-service";
 
 /** Clave estable: mismo comprobante (media) en misma conversación y flujo → una sola orden. */
 export function buildSorteoIdempotencyKey(
@@ -36,8 +35,17 @@ export function explainParseSorteoParticipantFailure(data: Record<string, string
     }
   }
   if (!qtyValid) {
+    for (const k of ["producto", "opcion_label", "combo", "opcion", "descripcion"] as const) {
+      const q = extractQtyFromFlowText(data[k]);
+      if (q != null) {
+        qtyValid = true;
+        break;
+      }
+    }
+  }
+  if (!qtyValid) {
     if (!foundKey) {
-      return "cantidad: ninguna clave con valor (cantidad_boletos | cantidad | boletos | qty)";
+      return "cantidad: ninguna clave numérica ni texto con cantidad (producto/opcion_label/etc.)";
     }
     return `cantidad: clave "${foundKey}"="${rawVal}" no es número entero >= 1`;
   }
@@ -49,6 +57,29 @@ export function explainParseSorteoParticipantFailure(data: Record<string, string
     return "nombre: falta nombre_completo | nombre_y_apellido | (nombre y apellido)";
   }
   return "desconocido";
+}
+
+/** Cantidad desde texto tipo "3 boletos", "Combo 5", "5", etc. */
+export function extractQtyFromFlowText(s: string | undefined): number | null {
+  const t = norm(s);
+  if (!t) return null;
+  const direct = Number(t.replace(",", "."));
+  if (Number.isFinite(direct) && direct >= 1) return Math.trunc(direct);
+  for (const re of [
+    /^(\d+)\s*bolet/i,
+    /^(\d+)\s*boleta/i,
+    /^(\d+)\s*entrada/i,
+    /^(\d+)\s*ticket/i,
+    /(\d+)\s*bolet/i,
+    /^(\d+)\b/,
+  ]) {
+    const m = t.match(re);
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n >= 1) return Math.trunc(n);
+    }
+  }
+  return null;
 }
 
 /**
@@ -69,6 +100,15 @@ export function parseSorteoParticipantFromFlowData(data: Record<string, string>)
     if (Number.isFinite(n) && n >= 1) {
       qty = Math.trunc(n);
       break;
+    }
+  }
+  if (!Number.isFinite(qty) || qty < 1) {
+    for (const k of ["producto", "opcion_label", "combo", "opcion", "descripcion"]) {
+      const q = extractQtyFromFlowText(data[k]);
+      if (q != null) {
+        qty = q;
+        break;
+      }
     }
   }
   if (!Number.isFinite(qty) || qty < 1) return null;
@@ -93,15 +133,22 @@ export async function getSorteoIdForChatFlow(
   empresaId: string,
   flowCode: string
 ): Promise<string | null> {
+  const fc = flowCode.trim();
+  if (!fc) return null;
   const { data, error } = await supabase
     .from("chat_flows")
-    .select("sorteo_id")
+    .select("sorteo_id, updated_at")
     .eq("empresa_id", empresaId)
-    .eq("flow_code", flowCode)
-    .maybeSingle();
-  if (error || !data) return null;
-  const sid = data.sorteo_id as string | null | undefined;
-  return sid && typeof sid === "string" ? sid : null;
+    .eq("flow_code", fc)
+    .order("updated_at", { ascending: false })
+    .limit(10);
+  if (error || !data?.length) return null;
+  const row = data.find((r) => {
+    const sid = (r as { sorteo_id?: string | null }).sorteo_id;
+    return typeof sid === "string" && sid.length > 0;
+  }) as { sorteo_id?: string | null } | undefined;
+  const sid = row?.sorteo_id;
+  return typeof sid === "string" ? sid : null;
 }
 
 export type EnsureSorteoOrderFromChatInput = {
@@ -130,41 +177,30 @@ export type EnsureSorteoOrderFromChatResult =
 /**
  * Crea orden (sorteo_entradas) + cupones vía RPC atómica e idempotente.
  * Si el flow no tiene sorteo_id o faltan datos, hace skip sin error.
+ * No exige `empresa_modulos.sorteos`: el vínculo explícito chat_flows.sorteo_id basta.
  */
 export async function ensureSorteoOrderFromChat(
   supabase: SupabaseClient,
   input: EnsureSorteoOrderFromChatInput
 ): Promise<EnsureSorteoOrderFromChatResult> {
+  const flowCode = input.flowCode.trim();
   console.info(FLOW_SORTEO_LOG, "ensureSorteoOrderFromChat_invoke", {
     conversationId: input.conversationId,
-    flowCode: input.flowCode,
+    flowCode,
     empresaId: input.empresaId,
     mediaId: input.mediaId,
     flowDataKeys: Object.keys(input.flowData),
     chat_flow_data: input.flowData,
   });
 
-  const tiene = await empresaTieneModuloSorteos(supabase, input.empresaId);
-  if (!tiene) {
-    console.warn(FLOW_SORTEO_LOG, "ensureSorteoOrderFromChat_outcome", {
-      path: "skipped",
-      reason: "modulo_sorteos_inactivo",
-      conversationId: input.conversationId,
-      flowCode: input.flowCode,
-      archivo: "src/lib/sorteos/sorteo-order-from-chat.ts",
-      condicion: "empresaTieneModuloSorteos === false",
-    });
-    return { ok: true, skipped: true, reason: "modulo_sorteos_inactivo" };
-  }
-
-  const sorteoId = await getSorteoIdForChatFlow(supabase, input.empresaId, input.flowCode);
+  const sorteoId = await getSorteoIdForChatFlow(supabase, input.empresaId, flowCode);
   if (!sorteoId) {
     console.warn(FLOW_SORTEO_LOG, "ensureSorteoOrderFromChat_outcome", {
       path: "skipped",
       reason: "flow_sin_sorteo_id",
       sorteo_id: null,
       conversationId: input.conversationId,
-      flowCode: input.flowCode,
+      flowCode,
       archivo: "src/lib/sorteos/sorteo-order-from-chat.ts",
       condicion: "getSorteoIdForChatFlow devolvió null (chat_flows.sorteo_id vacío o sin fila)",
     });
@@ -179,7 +215,7 @@ export async function ensureSorteoOrderFromChat(
       reason: "datos_flujo_incompletos",
       parseDetail,
       conversationId: input.conversationId,
-      flowCode: input.flowCode,
+      flowCode,
       sorteo_id: sorteoId,
       chat_flow_data: input.flowData,
       archivo: "src/lib/sorteos/sorteo-order-from-chat.ts",
@@ -190,7 +226,7 @@ export async function ensureSorteoOrderFromChat(
 
   const idempotencyKey = buildSorteoIdempotencyKey(
     input.conversationId,
-    input.flowCode,
+    flowCode,
     input.mediaId
   );
 
@@ -199,7 +235,7 @@ export async function ensureSorteoOrderFromChat(
       empresa_id: input.empresaId,
       sorteo_id: sorteoId,
       chat_conversation_id: input.conversationId,
-      flow_code: input.flowCode,
+      flow_code: flowCode,
       idempotency_key: idempotencyKey,
       whatsapp_numero: input.whatsappNumero,
       nombre_completo: participant.nombre_completo,
@@ -217,7 +253,7 @@ export async function ensureSorteoOrderFromChat(
       reason: "rpc_error",
       error: error.message,
       conversationId: input.conversationId,
-      flowCode: input.flowCode,
+      flowCode,
       sorteo_id: sorteoId,
       archivo: "src/lib/sorteos/sorteo-order-from-chat.ts",
       condicion: "supabase.rpc sorteos_ensure_order_from_chat devolvió error",
@@ -236,7 +272,7 @@ export async function ensureSorteoOrderFromChat(
       reason: "invalid_rpc_payload",
       error: invalidMsg,
       conversationId: input.conversationId,
-      flowCode: input.flowCode,
+      flowCode,
       sorteo_id: sorteoId,
       archivo: "src/lib/sorteos/sorteo-order-from-chat.ts",
       condicion: "!row || typeof row.ok !== boolean",
@@ -252,7 +288,7 @@ export async function ensureSorteoOrderFromChat(
       reason: "rpc_row_not_ok",
       error: msg,
       conversationId: input.conversationId,
-      flowCode: input.flowCode,
+      flowCode,
       sorteo_id: sorteoId,
       archivo: "src/lib/sorteos/sorteo-order-from-chat.ts",
       condicion: "row.ok === false (RPC negocio)",
@@ -289,7 +325,7 @@ export async function ensureSorteoOrderFromChat(
       reason: "entrada_incompleta",
       error: incompleteMsg,
       conversationId: input.conversationId,
-      flowCode: input.flowCode,
+      flowCode,
       sorteo_id: sorteoId,
       archivo: "src/lib/sorteos/sorteo-order-from-chat.ts",
       condicion: "!entradaId || !Number.isFinite(numeroOrden)",
@@ -303,7 +339,7 @@ export async function ensureSorteoOrderFromChat(
   console.info(FLOW_SORTEO_LOG, "ensureSorteoOrderFromChat_outcome", {
     path: "success",
     conversationId: input.conversationId,
-    flowCode: input.flowCode,
+    flowCode,
     sorteo_id: sorteoId,
     idempotent: row.idempotent === true,
     entradaId,
