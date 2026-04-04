@@ -36,19 +36,40 @@ export function labelSifenEstado(estado: string | null): string {
   return LABELS[estado] ?? estado;
 }
 
+const HINT_LISTA_SET = "Lista para enviar a SET";
+
 export function SifenEstadoBadge({
   estadoSifen,
   className = "",
+  /** En listados: muestra bajo el badge una pista si está firmado (no aplica a otros estados). */
+  mostrarPistaEnvioSet = true,
 }: {
   estadoSifen: string | null;
   className?: string;
+  mostrarPistaEnvioSet?: boolean;
 }) {
-  return (
+  const badge = (
     <span
       className={`inline-flex items-center text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${badgeClasses(estadoSifen)} ${className}`}
       title={labelSifenEstado(estadoSifen)}
     >
       {labelSifenEstado(estadoSifen)}
+    </span>
+  );
+
+  if (estadoSifen !== "firmado" || !mostrarPistaEnvioSet) {
+    return badge;
+  }
+
+  return (
+    <span className="inline-flex flex-col items-start gap-1 align-middle max-w-[11rem]">
+      {badge}
+      <span
+        className="text-[10px] sm:text-[11px] font-medium text-violet-800/90 leading-snug pl-0.5"
+        title={HINT_LISTA_SET}
+      >
+        {HINT_LISTA_SET}
+      </span>
     </span>
   );
 }

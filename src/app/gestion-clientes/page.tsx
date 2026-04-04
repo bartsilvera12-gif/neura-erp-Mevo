@@ -972,7 +972,7 @@ export default function GestionClientesPage() {
                             <td className="px-3 py-2.5">
                               <BadgeFactura estado={f._estadoEfectivo} />
                             </td>
-                            <td className="px-3 py-2.5">
+                            <td className="px-3 py-2.5 align-top">
                               <SifenEstadoBadge
                                 estadoSifen={sifenPorFactura[f.id]?.estado_sifen ?? null}
                               />

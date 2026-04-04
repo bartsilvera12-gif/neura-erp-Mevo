@@ -28,6 +28,22 @@ function isoToDateInput(iso: string | null): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Config “completa” según datos persistidos (no borrador en curso). */
+function isSifenConfigCompleta(c: EmpresaSifenConfigDTO): boolean {
+  const datos =
+    Boolean(c.ruc?.trim()) &&
+    Boolean(c.razon_social?.trim()) &&
+    Boolean(c.timbrado_numero?.trim()) &&
+    Boolean(c.establecimiento?.trim()) &&
+    Boolean(c.punto_expedicion?.trim());
+  return (
+    datos &&
+    c.activo === true &&
+    Boolean(c.certificado_path?.trim()) &&
+    c.has_certificado_password === true
+  );
+}
+
 export default function FacturacionElectronicaSifenPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -52,6 +68,8 @@ export default function FacturacionElectronicaSifenPage() {
   const certFileInputRef = useRef<HTMLInputElement>(null);
   /** Nombre del .p12 elegido en el diálogo (se limpia tras subida OK). */
   const [nombreArchivoCert, setNombreArchivoCert] = useState<string | null>(null);
+  /** Si la config está completa, permite colapsar el formulario (opción A). */
+  const [editarFormulario, setEditarFormulario] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,6 +104,10 @@ export default function FacturacionElectronicaSifenPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (cfg != null && !isSifenConfigCompleta(cfg)) setEditarFormulario(true);
+  }, [cfg]);
 
   /**
    * Vencimiento: obligatorio solo si ya hay .p12 en storage (certificado_path).
@@ -154,6 +176,7 @@ export default function FacturacionElectronicaSifenPage() {
         setCfg(j.data!);
         setNuevaPassword("");
         setSuccess("Configuración SIFEN creada correctamente.");
+        if (isSifenConfigCompleta(j.data)) setEditarFormulario(false);
       } else {
         const body: Record<string, unknown> = {
           ambiente,
@@ -183,6 +206,7 @@ export default function FacturacionElectronicaSifenPage() {
         setNuevaPassword("");
         setLimpiarPassword(false);
         setSuccess("Cambios guardados.");
+        if (isSifenConfigCompleta(j.data)) setEditarFormulario(false);
       }
       await load();
     } catch {
@@ -220,6 +244,8 @@ export default function FacturacionElectronicaSifenPage() {
       setNombreArchivoCert(null);
       setSuccess("Certificado .p12 cargado correctamente.");
       await load();
+      const c = j.data?.config as EmpresaSifenConfigDTO | undefined;
+      if (c && isSifenConfigCompleta(c)) setEditarFormulario(false);
     } catch {
       setError("Error de red al subir certificado");
     } finally {
@@ -237,6 +263,9 @@ export default function FacturacionElectronicaSifenPage() {
   const tieneCert = Boolean(cfg?.certificado_path);
   const tieneCertificadoCargado = Boolean(cfg?.certificado_path?.trim());
   const tienePw = Boolean(cfg?.has_certificado_password);
+
+  const configCompleta = cfg != null && isSifenConfigCompleta(cfg);
+  const mostrarFormulario = cfg == null || !configCompleta || editarFormulario;
 
   if (loading) {
     return (
@@ -265,6 +294,60 @@ export default function FacturacionElectronicaSifenPage() {
         </div>
       )}
 
+      {configCompleta && !mostrarFormulario && cfg && (
+        <Card>
+          <div className="rounded-xl border border-emerald-200 bg-gradient-to-b from-emerald-50/90 to-white px-5 py-5 space-y-4">
+            <div className="flex flex-wrap items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-lg" aria-hidden>
+                ✅
+              </span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <h2 className="text-lg font-bold text-emerald-950">Configuración SIFEN lista para operar</h2>
+                <p className="text-sm text-emerald-900/80 leading-relaxed">
+                  Ya completaste los datos del emisor, el certificado y la contraseña. Podés generar documentos electrónicos en el flujo de
+                  facturas cuando corresponda.
+                </p>
+              </div>
+            </div>
+            <ul className="text-sm text-slate-700 space-y-1.5 border-t border-emerald-100 pt-4">
+              <li>
+                <span className="text-slate-500">Ambiente:</span>{" "}
+                <span className="font-medium">{cfg.ambiente === "produccion" ? "Producción" : "Test"}</span>
+              </li>
+              <li>
+                <span className="text-slate-500">RUC:</span> <span className="font-mono font-medium">{cfg.ruc}</span>
+              </li>
+              <li>
+                <span className="text-slate-500">Razón social:</span> <span className="font-medium">{cfg.razon_social}</span>
+              </li>
+              <li>
+                <span className="text-slate-500">Certificado .p12:</span>{" "}
+                <span className="font-medium text-emerald-800">Cargado</span>
+              </li>
+              <li>
+                <span className="text-slate-500">Contraseña del certificado:</span>{" "}
+                <span className="font-medium text-emerald-800">Configurada</span>
+              </li>
+              <li>
+                <span className="text-slate-500">SIFEN:</span>{" "}
+                <span className="font-semibold text-emerald-800">Activo</span>
+              </li>
+            </ul>
+            <button
+              type="button"
+              onClick={() => {
+                setEditarFormulario(true);
+                setSuccess(null);
+              }}
+              className="w-full sm:w-auto rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+            >
+              Editar configuración
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {mostrarFormulario && (
       <Card>
         <SectionTitle>Estado</SectionTitle>
         <div className="flex flex-wrap gap-2">
@@ -300,8 +383,9 @@ export default function FacturacionElectronicaSifenPage() {
           </span>
         </div>
       </Card>
+      )}
 
-      <form onSubmit={guardar} className="space-y-5">
+      <form onSubmit={guardar} className={`space-y-5 ${mostrarFormulario ? "" : "hidden"}`} aria-hidden={!mostrarFormulario}>
         <Card>
           <SectionTitle>Datos del emisor</SectionTitle>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -445,13 +529,41 @@ export default function FacturacionElectronicaSifenPage() {
           </div>
         </Card>
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
-        >
-          {saving ? "Guardando…" : cfg ? "Guardar cambios" : "Crear configuración SIFEN"}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
+          >
+            {saving ? "Guardando…" : cfg ? "Guardar cambios" : "Crear configuración SIFEN"}
+          </button>
+          {configCompleta && editarFormulario && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditarFormulario(false);
+                setError(null);
+                setSuccess(null);
+                if (cfg) {
+                  setAmbiente(cfg.ambiente);
+                  setRuc(cfg.ruc);
+                  setRazonSocial(cfg.razon_social);
+                  setTimbradoNumero(cfg.timbrado_numero);
+                  setEstablecimiento(cfg.establecimiento);
+                  setPuntoExpedicion(cfg.punto_expedicion);
+                  setCsc(cfg.csc ?? "");
+                  setActivo(cfg.activo);
+                  setCertVenc(isoToDateInput(cfg.certificado_vencimiento));
+                }
+                setNuevaPassword("");
+                setLimpiarPassword(false);
+              }}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Cancelar edición
+            </button>
+          )}
+        </div>
       </form>
     </div>
   );

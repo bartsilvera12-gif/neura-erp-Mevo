@@ -1100,7 +1100,7 @@ export default function ClienteDetailPage() {
                               f.estado === "Vencido" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
                             }`}>{f.estado}</span>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 align-top">
                             <SifenEstadoBadge estadoSifen={sifenPorFactura[f.id]?.estado_sifen ?? null} />
                           </td>
                           <td className="px-4 py-3 text-right">
