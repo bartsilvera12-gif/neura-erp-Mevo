@@ -20,6 +20,18 @@ import {
 
 const NS = "http://ekuatia.set.gov.py/sifen/xsd";
 
+/** Enumeraciones / literales exactos según DE_Types_v150.xsd (y catálogos referidos). */
+const XSD_DES_TI_DE_FACTURA = "Factura electrónica";
+const XSD_DES_TIP_TRA_VENTA_MERC = "Venta de mercadería";
+const XSD_DES_IND_PRES_PRESENCIAL = "Operación presencial";
+const XSD_DES_T_IMP_IVA = "IVA";
+const XSD_DES_MONE_PYG = "Guarani";
+const XSD_DES_AFEC_EXENTO = "Exento";
+const XSD_DES_AFEC_GRAVADO = "Gravado IVA";
+const XSD_DES_DOC_CI_PY = "Cédula paraguaya";
+const XSD_DES_UNI_MED = "UNI";
+const XSD_D_COND_CRED_PLAZO = "Plazo";
+
 function textEl(name: string, value: string | number): string {
   const c = escapeXml(String(value));
   return `<${name}>${c}</${name}>`;
@@ -28,6 +40,12 @@ function textEl(name: string, value: string | number): string {
 /** Monto en guaraníes: entero sin separadores. */
 function montoGs(n: number): string {
   return String(Math.round(Number.isFinite(n) ? n : 0));
+}
+
+/** `tgTotSub.dRedon` — tipo `tdCRed` (decimal, hasta 4 decimales). */
+function montoRedondeo(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  return v.toFixed(4);
 }
 
 function formatDeDateTime(d: Date): string {
@@ -43,10 +61,10 @@ function inferirTasaIva(subtotal: number, iva: number): 0 | 5 | 10 {
   return 10;
 }
 
+/** `tdDesAfecIVA`: solo coinciden textos fijos del XSD (la tasa va en `dTasaIVA`). */
 function descripcionAfectacion(tasa: 0 | 5 | 10): string {
-  if (tasa === 0) return "Exento";
-  if (tasa === 5) return "Gravado IVA (5%)";
-  return "Gravado IVA";
+  if (tasa === 0) return XSD_DES_AFEC_EXENTO;
+  return XSD_DES_AFEC_GRAVADO;
 }
 
 function dCodSegNueveDigitos(csc: string, semilla: string): string {
@@ -63,8 +81,11 @@ function dCodSegNueveDigitos(csc: string, semilla: string): string {
 export interface BuildRdeXmlOptions {
   /** Vigencia timbrado inicio YYYY-MM-DD (obligatorio en DE). */
   timbradoFechaInicio: string;
-  /** Vigencia timbrado fin YYYY-MM-DD. */
-  timbradoFechaFin: string;
+  /**
+   * Vigencia timbrado fin (YYYY-MM-DD). Reservado para futuras NT; en el XSD v150
+   * publicado `tgDTim` no incluye `dFeFinT`, por lo que no se serializa en el XML.
+   */
+  timbradoFechaFin?: string;
   /** Teléfono emisor 8–15 dígitos (solo números). */
   emisorTelefono: string;
   /** Email emisor válido según patrón SIFEN. */
@@ -140,7 +161,6 @@ export function buildOfficialRdeFacturaElectronicaXml(
   const dFecFirma = dFeEmiDE;
 
   const dFeIniT = vigenciaIso(opts.timbradoFechaInicio);
-  const dFeFinT = vigenciaIso(opts.timbradoFechaFin);
 
   const telEmi = opts.emisorTelefono.replace(/\D/g, "");
   if (telEmi.length < 8 || telEmi.length > 15) {
@@ -212,7 +232,7 @@ export function buildOfficialRdeFacturaElectronicaXml(
     recParts.push(textEl("cPaisRec", "PRY"));
     recParts.push(textEl("dDesPaisRe", "Paraguay"));
     recParts.push(textEl("iTipIDRec", "1"));
-    recParts.push(textEl("dDTipIDRec", "Cédula paraguaya"));
+    recParts.push(textEl("dDTipIDRec", XSD_DES_DOC_CI_PY));
     recParts.push(textEl("dNumIDRec", doc.slice(0, 20)));
     recParts.push(textEl("dNomRec", receptor.nombre.trim()));
     if (receptor.direccion?.trim()) recParts.push(textEl("dDirRec", receptor.direccion.trim()));
@@ -253,9 +273,13 @@ export function buildOfficialRdeFacturaElectronicaXml(
 
     const iAfec = tasa === 0 ? "3" : "1";
     const cUniMed = "77";
-    const dDesUniMed = "UNI";
+    const dDesUniMed = XSD_DES_UNI_MED;
     const dCant = Number(it.cantidad);
     const cantStr = Number.isFinite(dCant) ? String(dCant) : "1";
+
+    const subR = Math.round(it.subtotal);
+    const ivaR = Math.round(it.iva);
+    const dTotBruOpeItem = Math.max(dTotOpeItem, subR + ivaR, subR);
 
     itemsXml.push("<gCamItem>");
     itemsXml.push(textEl("dCodInt", `L${idx + 1}`.slice(0, 20)));
@@ -265,9 +289,12 @@ export function buildOfficialRdeFacturaElectronicaXml(
     itemsXml.push(textEl("dCantProSer", cantStr));
     itemsXml.push("<gValorItem>");
     itemsXml.push(textEl("dPUniProSer", montoGs(it.precio_unitario)));
+    itemsXml.push(textEl("dTotBruOpeItem", dTotBruOpeItem));
+    itemsXml.push("<gValorRestaItem>");
     itemsXml.push(textEl("dDescItem", "0"));
     itemsXml.push(textEl("dTotOpeItem", dTotOpeItem));
     itemsXml.push(textEl("dTotOpeGs", dTotOpeItem));
+    itemsXml.push("</gValorRestaItem>");
     itemsXml.push("</gValorItem>");
     itemsXml.push("<gCamIVA>");
     itemsXml.push(textEl("iAfecIVA", iAfec));
@@ -276,6 +303,7 @@ export function buildOfficialRdeFacturaElectronicaXml(
     itemsXml.push(textEl("dTasaIVA", tasa));
     itemsXml.push(textEl("dBasGravIVA", baseGrav));
     itemsXml.push(textEl("dLiqIVAItem", dLiq));
+    itemsXml.push(textEl("dBasExe", tasa === 0 ? dTotOpeItem : 0));
     itemsXml.push("</gCamIVA>");
     itemsXml.push("</gCamItem>");
   });
@@ -283,26 +311,30 @@ export function buildOfficialRdeFacturaElectronicaXml(
   const dTotOpe = sumSub10 + sumSub5 + sumSubExe;
   const dTotIVA = sumIva10 + sumIva5;
   const dTotGralOpe = dTotOpe;
+  const dTBasGraIVA = sumBase5 + sumBase10;
 
-  const totParts = [
-    "<gTotSub>",
-    ...(sumSubExe > 0 ? [textEl("dSubExe", sumSubExe)] : []),
-    ...(sumSub5 > 0 ? [textEl("dSub5", sumSub5)] : []),
-    ...(sumSub10 > 0 ? [textEl("dSub10", sumSub10)] : []),
+  /** Secuencia estricta `tgTotSub` en DE_v150.xsd */
+  const totParts: string[] = ["<gTotSub>"];
+  if (sumSubExe > 0) totParts.push(textEl("dSubExe", sumSubExe));
+  if (sumSub5 > 0) totParts.push(textEl("dSub5", sumSub5));
+  if (sumSub10 > 0) totParts.push(textEl("dSub10", sumSub10));
+  totParts.push(
     textEl("dTotOpe", dTotOpe),
     textEl("dTotDesc", "0"),
+    textEl("dTotDescGlotem", "0"),
+    textEl("dTotAntItem", "0"),
+    textEl("dTotAnt", "0"),
     textEl("dPorcDescTotal", "0"),
     textEl("dDescTotal", "0"),
     textEl("dAnticipo", "0"),
-    textEl("dRedon", "0"),
-    textEl("dTotGralOpe", dTotGralOpe),
-  ];
+    textEl("dRedon", montoRedondeo(0)),
+    textEl("dTotGralOpe", dTotGralOpe)
+  );
   if (sumIva5 > 0) totParts.push(textEl("dIVA5", sumIva5));
   if (sumIva10 > 0) totParts.push(textEl("dIVA10", sumIva10));
   if (dTotIVA > 0) totParts.push(textEl("dTotIVA", dTotIVA));
   if (sumBase5 > 0) totParts.push(textEl("dBaseGrav5", sumBase5));
   if (sumBase10 > 0) totParts.push(textEl("dBaseGrav10", sumBase10));
-  const dTBasGraIVA = sumBase5 + sumBase10;
   if (dTBasGraIVA > 0) totParts.push(textEl("dTBasGraIVA", dTBasGraIVA));
   totParts.push(textEl("dTotalGs", dTotGralOpe));
   totParts.push("</gTotSub>");
@@ -316,7 +348,7 @@ export function buildOfficialRdeFacturaElectronicaXml(
       textEl("dDCondOpe", "Crédito"),
       "<gPagCred>",
       textEl("iCondCred", "1"),
-      textEl("dDCondCred", "Plazo fijo"),
+      textEl("dDCondCred", XSD_D_COND_CRED_PLAZO),
       textEl("dPlazoCre", "30"),
       "</gPagCred>",
       "</gCamCond>",
@@ -331,7 +363,7 @@ export function buildOfficialRdeFacturaElectronicaXml(
       textEl("dDesTiPag", "Efectivo"),
       textEl("dMonTiPag", dTotGralOpe),
       textEl("cMoneTiPag", "PYG"),
-      textEl("dDMoneTiPag", "Guarani"),
+      textEl("dDMoneTiPag", XSD_DES_MONE_PYG),
       "</gPaConEIni>",
       "</gCamCond>",
     ].join("");
@@ -340,6 +372,7 @@ export function buildOfficialRdeFacturaElectronicaXml(
   const deInner = [
     textEl("dDVId", dDVId),
     textEl("dFecFirma", dFecFirma),
+    textEl("dSisFact", "1"),
     "<gOpeDE>",
     textEl("iTipEmi", "1"),
     textEl("dDesTipEmi", "Normal"),
@@ -347,23 +380,22 @@ export function buildOfficialRdeFacturaElectronicaXml(
     "</gOpeDE>",
     "<gTimb>",
     textEl("iTiDE", "1"),
-    textEl("dDesTiDE", "Factura electrónica"),
+    textEl("dDesTiDE", XSD_DES_TI_DE_FACTURA),
     textEl("dNumTim", dNumTim),
     textEl("dEst", dEst),
     textEl("dPunExp", dPunExp),
     textEl("dNumDoc", dNumDoc),
     textEl("dFeIniT", dFeIniT),
-    textEl("dFeFinT", dFeFinT),
     "</gTimb>",
     "<gDatGralOpe>",
     textEl("dFeEmiDE", dFeEmiDE),
     "<gOpeCom>",
     textEl("iTipTra", "1"),
-    textEl("dDesTipTra", "Venta de mercadería"),
+    textEl("dDesTipTra", XSD_DES_TIP_TRA_VENTA_MERC),
     textEl("iTImp", "1"),
-    textEl("dDesTImp", "IVA"),
+    textEl("dDesTImp", XSD_DES_T_IMP_IVA),
     textEl("cMoneOpe", "PYG"),
-    textEl("dDesMoneOpe", "Guarani"),
+    textEl("dDesMoneOpe", XSD_DES_MONE_PYG),
     "</gOpeCom>",
     ...gEmisParts,
     ...recParts,
@@ -371,7 +403,7 @@ export function buildOfficialRdeFacturaElectronicaXml(
     "<gDtipDE>",
     "<gCamFE>",
     textEl("iIndPres", "1"),
-    textEl("dDesIndPres", "Operación presencial"),
+    textEl("dDesIndPres", XSD_DES_IND_PRES_PRESENCIAL),
     "</gCamFE>",
     gCamCondXml,
     ...itemsXml,

@@ -77,7 +77,8 @@ export type EstadoSifen =
   | "firmado"
   | "enviado"
   | "aprobado"
-  | "rechazado";
+  | "rechazado"
+  | "error_envio";
 
 /** Fila de public.factura_electronica (respuesta API). */
 export interface FacturaElectronicaDTO {
@@ -91,6 +92,10 @@ export interface FacturaElectronicaDTO {
   kuDE_url: string | null;
   qr_data: string | null;
   error: string | null;
+  /** dProtConsLote (SET) tras envío exitoso a recibe-lote (0300). */
+  sifen_d_prot_cons_lote: string | null;
+  /** Última respuesta recibe-lote (parseada + cuerpo SOAP). */
+  sifen_ultima_respuesta_recibe_lote: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -273,4 +278,36 @@ export interface SifenFirmarResponseData {
   storage_bucket: string;
   /** Solo con ?debug=1 */
   xml_firmado?: string;
+}
+
+/** Detalle del evento POST enviar-test (recibe-lote). */
+export interface SifenApiEnviarTestDetalle {
+  origen: "api_enviar_test";
+  factura_id: string;
+  xml_firmado_path: string;
+  dCodRes: string | null;
+  dMsgRes: string | null;
+  dProtConsLote: string | null;
+  httpStatus: number;
+  loteRecibido: boolean;
+  loteNoEncolado: boolean;
+}
+
+/** Respuesta de POST /api/facturas/[id]/sifen/enviar-test */
+export interface SifenEnviarTestResponseData {
+  factura_electronica: FacturaElectronicaDTO;
+  storage_bucket: string;
+  /** Eco de la respuesta SET (también persistida en factura_electronica / evento). */
+  recibe_lote: {
+    dCodRes: string | null;
+    dMsgRes: string | null;
+    dProtConsLote: string | null;
+    dFecProc: string | null;
+    dTpoProces: number | null;
+    httpStatus: number;
+    loteRecibido: boolean;
+    loteNoEncolado: boolean;
+  };
+  /** Solo con ?debug=1 */
+  cuerpo_soap?: string;
 }

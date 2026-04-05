@@ -13,6 +13,12 @@ export function toFacturaElectronicaDto(row: Record<string, unknown>): FacturaEl
     kuDE_url: row.kuDE_url == null ? null : String(row.kuDE_url),
     qr_data: row.qr_data == null ? null : String(row.qr_data),
     error: row.error == null ? null : String(row.error),
+    sifen_d_prot_cons_lote:
+      row.sifen_d_prot_cons_lote == null ? null : String(row.sifen_d_prot_cons_lote),
+    sifen_ultima_respuesta_recibe_lote:
+      row.sifen_ultima_respuesta_recibe_lote == null || typeof row.sifen_ultima_respuesta_recibe_lote !== "object"
+        ? null
+        : (row.sifen_ultima_respuesta_recibe_lote as Record<string, unknown>),
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
   };
