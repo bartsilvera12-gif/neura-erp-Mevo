@@ -3,15 +3,20 @@ import {
   validateAndBuildSifenPayload,
   type BuildSifenPayloadInput,
 } from "./build-payload";
-import type { SifenFacturaPayloadBase } from "./types";
+import type { AmbienteSifen, SifenFacturaPayloadBase } from "./types";
 
 export type LoadSifenPayloadFailure =
   | { status: 400; message: string }
   | { status: 404; message: string };
 
 export type LoadSifenPayloadResult =
-  | { ok: true; payload: SifenFacturaPayloadBase }
+  | { ok: true; payload: SifenFacturaPayloadBase; ambiente: AmbienteSifen }
   | { ok: false; error: LoadSifenPayloadFailure };
+
+function ambienteDesdeConfigRow(raw: unknown): AmbienteSifen {
+  const s = String(raw ?? "").trim().toLowerCase();
+  return s === "produccion" ? "produccion" : "test";
+}
 
 /**
  * Carga factura, ítems, cliente, config SIFEN y borrador electrónico;
@@ -56,7 +61,7 @@ export async function loadValidatedSifenPayload(
     supabase
       .from("empresa_sifen_config")
       .select(
-        "ruc, razon_social, direccion_fiscal, timbrado_numero, establecimiento, punto_expedicion, csc, activo"
+        "ruc, razon_social, direccion_fiscal, timbrado_numero, establecimiento, punto_expedicion, csc, activo, ambiente"
       )
       .eq("empresa_id", empresaId)
       .maybeSingle(),
@@ -103,5 +108,9 @@ export async function loadValidatedSifenPayload(
     return { ok: false, error: { status: 400, message: built.error } };
   }
 
-  return { ok: true, payload: built.payload };
+  return {
+    ok: true,
+    payload: built.payload,
+    ambiente: ambienteDesdeConfigRow(configRes.data?.ambiente),
+  };
 }

@@ -94,12 +94,14 @@ export async function POST(
     }
 
     const fecha = loaded.payload.documento.fecha.trim();
+    /** Vigencia de timbrado en DE: hoy se deriva del año de la factura (no hay fechas de vigencia en `empresa_sifen_config`). */
     const yAnio = /^(\d{4})/.exec(fecha)?.[1] ?? String(new Date().getFullYear());
     let xmlString: string;
     try {
       xmlString = buildOfficialRdeFacturaElectronicaXml(loaded.payload, {
         timbradoFechaInicio: `${yAnio}-01-01`,
         timbradoFechaFin: `${yAnio}-12-31`,
+        ambiente: loaded.ambiente,
         emisorTelefono: "021000000",
         emisorEmail: "facturacion@configurar-empresa.com.py",
         emisorDireccion: loaded.payload.emisor.direccion_fiscal.trim(),

@@ -6,7 +6,11 @@
  * Referencia estructural: pysifen/de/samples/v150/factura_electronica.xml (kmee/sifen).
  */
 import { createHash } from "node:crypto";
-import type { SifenFacturaPayloadBase } from "./types";
+import type { AmbienteSifen, SifenFacturaPayloadBase } from "./types";
+import {
+  SIFEN_TEST_CSC_GENERICO,
+  SIFEN_TEST_LITERAL_DOCUMENTO,
+} from "./sifen-ambiente-test";
 import { escapeXml } from "./xml";
 import {
   fechaEmisionCdc,
@@ -98,11 +102,10 @@ function dCodSegNueveDigitos(csc: string, semilla: string): string {
 export interface BuildRdeXmlOptions {
   /** Vigencia timbrado inicio YYYY-MM-DD (obligatorio en DE). */
   timbradoFechaInicio: string;
-  /**
-   * Vigencia timbrado fin (YYYY-MM-DD). Reservado para futuras NT; en el XSD v150
-   * publicado `tgDTim` no incluye `dFeFinT`, por lo que no se serializa en el XML.
-   */
+  /** Vigencia timbrado fin YYYY-MM-DD → `gTimb.dFeFinT` cuando está definido. */
   timbradoFechaFin?: string;
+  /** Ambiente SIFEN de la empresa: en `test` aplican literales y CSC genérico del DE. */
+  ambiente?: AmbienteSifen;
   /** Teléfono emisor 8–15 dígitos (solo números). */
   emisorTelefono: string;
   /** Email emisor válido según patrón SIFEN. */
@@ -146,11 +149,19 @@ export function buildOfficialRdeFacturaElectronicaXml(
     );
   }
 
-  const csc = emisor.csc;
-  if (csc == null || String(csc).trim() === "") {
-    throw new Error("Falta CSC en configuración SIFEN (empresa_sifen_config.csc) para generar el DE.");
+  const ambiente: AmbienteSifen = opts.ambiente ?? "produccion";
+  const esAmbienteTest = ambiente === "test";
+
+  let cscParaCodSeg: string;
+  if (esAmbienteTest) {
+    cscParaCodSeg = SIFEN_TEST_CSC_GENERICO;
+  } else {
+    const csc = emisor.csc;
+    if (csc == null || String(csc).trim() === "") {
+      throw new Error("Falta CSC en configuración SIFEN (empresa_sifen_config.csc) para generar el DE.");
+    }
+    cscParaCodSeg = String(csc).trim();
   }
-  const cscStr = String(csc).trim();
 
   const { cuerpo: rucEmCuerpo, dDV: dDVEmi } = splitRucParaXml(emisor.ruc);
   const dRucEmCdc = padDigits(rucEmCuerpo, 8);
@@ -161,7 +172,7 @@ export function buildOfficialRdeFacturaElectronicaXml(
   const fechaCdc = fechaEmisionCdc(documento.fecha);
 
   const semillaSeg = `${base.sifen.factura_electronica_id}-${Date.now()}`;
-  const dCodSeg = dCodSegNueveDigitos(cscStr, semillaSeg);
+  const dCodSeg = dCodSegNueveDigitos(cscParaCodSeg, semillaSeg);
 
   const { cdc, dDVId } = generarCdcFacturaElectronica({
     iTiDE: "1",
@@ -178,6 +189,10 @@ export function buildOfficialRdeFacturaElectronicaXml(
   const dFecFirma = dFeEmiDE;
 
   const dFeIniT = vigenciaIso(opts.timbradoFechaInicio);
+  const dFeFinT =
+    opts.timbradoFechaFin != null && String(opts.timbradoFechaFin).trim() !== ""
+      ? vigenciaIso(String(opts.timbradoFechaFin))
+      : null;
 
   const telEmi = opts.emisorTelefono.replace(/\D/g, "");
   if (telEmi.length < 8 || telEmi.length > 15) {
@@ -192,12 +207,14 @@ export function buildOfficialRdeFacturaElectronicaXml(
   const cAct = (opts.actividadEconomicaCodigo ?? "47111").trim();
   const dActDes = (opts.actividadEconomicaDescripcion ?? "Comercio al por menor").trim();
 
+  const dNomEmi = esAmbienteTest ? SIFEN_TEST_LITERAL_DOCUMENTO : emisor.razon_social.trim();
+
   const gEmisParts: string[] = [
     "<gEmis>",
     textEl("dRucEm", rucEmCuerpo),
     textEl("dDVEmi", dDVEmi),
     textEl("iTipCont", "1"),
-    textEl("dNomEmi", emisor.razon_social.trim()),
+    textEl("dNomEmi", dNomEmi),
     textEl("dDirEmi", dirEmi),
     textEl("dNumCas", opts.emisorNumCasa),
     textEl("cDepEmi", dep),
@@ -300,7 +317,11 @@ export function buildOfficialRdeFacturaElectronicaXml(
 
     itemsXml.push("<gCamItem>");
     itemsXml.push(textEl("dCodInt", `L${idx + 1}`.slice(0, 20)));
-    itemsXml.push(textEl("dDesProSer", it.descripcion.slice(0, 120)));
+    const dDesProSer =
+      esAmbienteTest && idx === 0
+        ? SIFEN_TEST_LITERAL_DOCUMENTO
+        : it.descripcion.slice(0, 120);
+    itemsXml.push(textEl("dDesProSer", dDesProSer));
     itemsXml.push(textEl("cUniMed", cUniMed));
     itemsXml.push(textEl("dDesUniMed", dDesUniMed));
     itemsXml.push(textEl("dCantProSer", cantStr));
@@ -403,6 +424,7 @@ export function buildOfficialRdeFacturaElectronicaXml(
     textEl("dPunExp", dPunExp),
     textEl("dNumDoc", dNumDoc),
     textEl("dFeIniT", dFeIniT),
+    ...(dFeFinT != null ? [textEl("dFeFinT", dFeFinT)] : []),
     "</gTimb>",
     "<gDatGralOpe>",
     textEl("dFeEmiDE", dFeEmiDE),
