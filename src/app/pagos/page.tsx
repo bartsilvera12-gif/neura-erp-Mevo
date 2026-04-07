@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { enRangoCalendario, hoyYmdLocal, rangoDesdeHastaInputs, toCalendarDateStr } from "@/lib/fechas/calendario";
 import { getFacturas } from "@/lib/gestion-clientes/storage";
 import MontoInput from "@/components/ui/MontoInput";
 import { getClientes } from "@/lib/clientes/storage";
@@ -40,6 +41,23 @@ export default function PagosPage() {
   const [facturaSeleccionada, setFacturaSeleccionada] = useState<Factura | null>(null);
   const [formPago, setFormPago] = useState({ monto: "", fecha_pago: "", metodo_pago: "efectivo" as const, referencia: "" });
   const [guardando, setGuardando] = useState(false);
+  const [filtroDesde, setFiltroDesde] = useState("");
+  const [filtroHasta, setFiltroHasta] = useState("");
+
+  const rangoFechas = useMemo(
+    () => rangoDesdeHastaInputs(filtroDesde, filtroHasta),
+    [filtroDesde, filtroHasta]
+  );
+
+  const fechaEnRangoCalendario = useCallback(
+    (fechaRaw: string): boolean => {
+      if (!rangoFechas) return true;
+      const cal = toCalendarDateStr(fechaRaw);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cal)) return false;
+      return enRangoCalendario(cal, rangoFechas.desde, rangoFechas.hasta);
+    },
+    [rangoFechas]
+  );
 
   useEffect(() => {
     getFacturas().then(setFacturas);
@@ -66,7 +84,7 @@ export default function PagosPage() {
             factura_numero: (p.factura_numero as string) ?? "—",
             cliente_nombre: (p.cliente_nombre as string) ?? "—",
             monto: Number(p.monto) || 0,
-            fecha_pago: (p.fecha_pago as string) ?? "",
+            fecha_pago: toCalendarDateStr((p.fecha_pago as string) ?? "") || String(p.fecha_pago ?? "").slice(0, 10),
             metodo_pago: (p.metodo_pago as string) ?? "efectivo",
             usuario_email: (p.usuario_email as string) ?? "—",
             referencia: (p.referencia as string) || undefined,
@@ -86,12 +104,31 @@ export default function PagosPage() {
     if (tab === "cobrados") fetchCobrados();
   }, [tab]);
 
-  const pendientes = facturas.filter((f) => {
-    if (f.saldo <= 0 || f.estado === "Anulado") return false;
-    const cli = clientes.find((c) => c.id === f.cliente_id);
-    if (cli?.estado === "inactivo") return false;
-    return true;
-  });
+  const pendientesBase = useMemo(
+    () =>
+      facturas.filter((f) => {
+        if (f.saldo <= 0 || f.estado === "Anulado") return false;
+        const cli = clientes.find((c) => c.id === f.cliente_id);
+        if (cli?.estado === "inactivo") return false;
+        return true;
+      }),
+    [facturas, clientes]
+  );
+
+  const pendientes = useMemo(() => {
+    if (!rangoFechas) return pendientesBase;
+    return pendientesBase.filter(
+      (f) =>
+        fechaEnRangoCalendario(f.fecha) ||
+        fechaEnRangoCalendario(f.fecha_vencimiento)
+    );
+  }, [pendientesBase, rangoFechas, fechaEnRangoCalendario]);
+
+  const cobradosFiltrados = useMemo(() => {
+    if (!rangoFechas) return cobrados;
+    return cobrados.filter((p) => fechaEnRangoCalendario(p.fecha_pago));
+  }, [cobrados, rangoFechas, fechaEnRangoCalendario]);
+
   const clienteMap = Object.fromEntries(clientes.map((c) => [c.id, c.nombre]));
 
   async function handleRegistrarPago(e: React.FormEvent) {
@@ -158,11 +195,51 @@ export default function PagosPage() {
         </button>
       </div>
 
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm">
+        <p className="w-full text-xs text-slate-500 sm:w-auto sm:mr-2">
+          Filtro por fechas (calendario local, mismo criterio que el dashboard). Se aplica al elegir desde/hasta.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className={labelClass}>Desde</label>
+            <input
+              type="date"
+              value={filtroDesde}
+              onChange={(e) => setFiltroDesde(e.target.value)}
+              className={`${inputClass} w-[11rem]`}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Hasta</label>
+            <input
+              type="date"
+              value={filtroHasta}
+              onChange={(e) => setFiltroHasta(e.target.value)}
+              className={`${inputClass} w-[11rem]`}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setFiltroDesde("");
+              setFiltroHasta("");
+            }}
+            className="border border-slate-300 bg-white px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Limpiar filtros
+          </button>
+        </div>
+      </div>
+
       {tab === "pendientes" && (
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-700">Facturas pendientes de cobro</h2>
-          <span className="text-xs text-slate-500">{pendientes.length} facturas con saldo</span>
+          <span className="text-xs text-slate-500">
+            {rangoFechas
+              ? `${pendientes.length} en el rango · ${pendientesBase.length} con saldo en total`
+              : `${pendientes.length} facturas con saldo`}
+          </span>
         </div>
         {pendientes.length === 0 ? (
           <div className="p-12 text-center text-slate-500">
@@ -202,7 +279,7 @@ export default function PagosPage() {
                         type="button"
                         onClick={() => {
                           setFacturaSeleccionada(f);
-                          setFormPago({ monto: String(f.saldo), fecha_pago: new Date().toISOString().slice(0, 10), metodo_pago: "efectivo", referencia: "" });
+                          setFormPago({ monto: String(f.saldo), fecha_pago: hoyYmdLocal(), metodo_pago: "efectivo", referencia: "" });
                           setModalPago(true);
                         }}
                         className="text-xs font-medium text-[#0EA5E9] hover:underline"
@@ -223,7 +300,11 @@ export default function PagosPage() {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-700">Pagos registrados</h2>
-            <span className="text-xs text-slate-500">{cobrados.length} pagos</span>
+            <span className="text-xs text-slate-500">
+              {rangoFechas && cobrados.length > 0
+                ? `${cobradosFiltrados.length} en el rango · ${cobrados.length} pagos en total`
+                : `${cobradosFiltrados.length} pago${cobradosFiltrados.length === 1 ? "" : "s"}`}
+            </span>
           </div>
           {cargandoCobrados ? (
             <div className="p-12 text-center text-slate-500 text-sm">Cargando…</div>
@@ -231,6 +312,20 @@ export default function PagosPage() {
             <div className="p-12 text-center text-slate-500">
               <p className="text-sm">No hay pagos registrados.</p>
               <span className="text-xs mt-2 block">Los pagos aparecerán aquí cuando los registres.</span>
+            </div>
+          ) : cobradosFiltrados.length === 0 ? (
+            <div className="p-12 text-center text-slate-500">
+              <p className="text-sm">Ningún pago en el rango de fechas seleccionado.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setFiltroDesde("");
+                  setFiltroHasta("");
+                }}
+                className="text-[#0EA5E9] hover:underline text-xs mt-2"
+              >
+                Limpiar filtros
+              </button>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -243,7 +338,7 @@ export default function PagosPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {cobrados.map((p) => (
+                  {cobradosFiltrados.map((p) => (
                     <tr key={p.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-mono text-slate-800">{p.factura_numero}</td>
                       <td className="px-4 py-3 text-slate-700 truncate max-w-[140px]">{p.cliente_nombre}</td>

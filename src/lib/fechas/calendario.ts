@@ -22,6 +22,40 @@ export function hoyYmdLocal(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/**
+ * Rango inclusivo en calendario local (misma idea que getRango + enRango en el dashboard).
+ * Cadenas vacías = sin límite en ese extremo. Si ambas vacías, devuelve null (sin filtro).
+ * Si solo una fecha, el otro extremo queda abierto (1970…2100).
+ */
+export function rangoDesdeHastaInputs(desdeStr: string, hastaStr: string): { desde: Date; hasta: Date } | null {
+  const dNorm = desdeStr.trim() ? toCalendarDateStr(desdeStr) : "";
+  const hNorm = hastaStr.trim() ? toCalendarDateStr(hastaStr) : "";
+  if (!dNorm && !hNorm) return null;
+
+  const minDate = new Date(1970, 0, 1, 0, 0, 0, 0);
+  const maxDate = new Date(2100, 11, 31, 23, 59, 59, 999);
+
+  let desde = minDate;
+  let hasta = maxDate;
+
+  if (dNorm && /^\d{4}-\d{2}-\d{2}$/.test(dNorm)) {
+    const [y, m, d] = dNorm.split("-").map(Number);
+    desde = new Date(y, m - 1, d, 0, 0, 0, 0);
+  }
+  if (hNorm && /^\d{4}-\d{2}-\d{2}$/.test(hNorm)) {
+    const [y, m, d] = hNorm.split("-").map(Number);
+    hasta = new Date(y, m - 1, d, 23, 59, 59, 999);
+  }
+
+  if (desde.getTime() > hasta.getTime()) {
+    const tmp = desde;
+    desde = new Date(hasta.getFullYear(), hasta.getMonth(), hasta.getDate(), 0, 0, 0, 0);
+    hasta = new Date(tmp.getFullYear(), tmp.getMonth(), tmp.getDate(), 23, 59, 59, 999);
+  }
+
+  return { desde, hasta };
+}
+
 /** Inclusive: desde/hasta son fechas con hora (típ. getRango). */
 export function enRangoCalendario(ymd: string, desde: Date, hasta: Date): boolean {
   const cal = toCalendarDateStr(ymd);
