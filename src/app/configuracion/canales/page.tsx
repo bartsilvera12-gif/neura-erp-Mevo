@@ -4,10 +4,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ConectarCanalModal } from "@/components/chat/ConectarCanalModal";
 import { ChannelBadge, channelTypeLabel } from "@/components/chat/ChannelBadge";
+import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { fetchChatChannels, type ChatChannelRow } from "@/lib/chat/actions";
-import { getMisModulos } from "@/lib/empresas/actions";
 
-function hasOmnichannel(slugs: string[]) {
+function hasOmnichannelFromModuleAccess(body: {
+  superAdmin?: boolean;
+  slugs?: string[];
+}): boolean {
+  if (body.superAdmin) return true;
+  const slugs = Array.isArray(body.slugs) ? body.slugs : [];
   return slugs.includes("conversaciones") || slugs.includes("omnicanal");
 }
 
@@ -32,8 +37,15 @@ export default function ConfiguracionCanalesHubPage() {
   }, []);
 
   useEffect(() => {
-    getMisModulos()
-      .then((mods) => setAllowed(hasOmnichannel(mods.map((m) => m.slug))))
+    fetchWithSupabaseSession("/api/empresas/module-access", { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) {
+          setAllowed(false);
+          return;
+        }
+        const body = (await res.json()) as { superAdmin?: boolean; slugs?: string[] };
+        setAllowed(hasOmnichannelFromModuleAccess(body));
+      })
       .catch(() => setAllowed(false));
   }, []);
 

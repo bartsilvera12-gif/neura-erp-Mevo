@@ -19,7 +19,7 @@ import type {
   GastoRaw,
   SuscripcionDashRow,
 } from "@/lib/dashboard/data";
-import { enRangoCalendario, enMesCalendarioActual } from "@/lib/fechas/calendario";
+import { enRangoCalendario, enMesCalendarioActual, toCalendarDateStr } from "@/lib/fechas/calendario";
 
 // ── ZENTRA (solo dashboard / esta página) ─────────────────────────────────────
 const Z = {
@@ -104,13 +104,14 @@ function getRango(periodo: Periodo): { desde: Date; hasta: Date } {
 }
 
 /** Fecha pura YYYY-MM-DD: comparación calendario (sin UTC). ISO con hora: rango por instante. */
-function enRango(fechaStr: string, desde: Date, hasta: Date): boolean {
-  const t = fechaStr.trim();
+function enRango(fechaStr: string | null | undefined, desde: Date, hasta: Date): boolean {
+  const t = String(fechaStr ?? "").trim();
+  if (!t) return false;
   const cal = t.slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(cal) && t.length <= 10) {
     return enRangoCalendario(cal, desde, hasta);
   }
-  const f = new Date(fechaStr);
+  const f = new Date(t);
   return !isNaN(f.getTime()) && f >= desde && f <= hasta;
 }
 
@@ -349,7 +350,11 @@ function ProgressBar({
   format?: "number" | "gs" | "pct";
   variant?: "light" | "zentra";
 }) {
-  const pct = meta > 0 ? Math.min((value / meta) * 100, 100) : 0;
+  const valueN = Number(value);
+  const metaN = Number(meta);
+  const v = Number.isFinite(valueN) ? valueN : 0;
+  const m = Number.isFinite(metaN) && metaN > 0 ? metaN : 0;
+  const pct = m > 0 ? Math.min((v / m) * 100, 100) : 0;
   const color =
     variant === "zentra"
       ? pct >= 100
@@ -368,6 +373,8 @@ function ProgressBar({
       : "";
   const fmt = (n: number) =>
     format === "gs" ? `Gs. ${formatGsM(n)}` : format === "pct" ? `${n.toFixed(1)}%` : String(n);
+  const metaLabel =
+    m > 0 ? fmt(m) : format === "gs" ? "sin meta" : "—";
   const isZ = variant === "zentra";
 
   return (
@@ -377,7 +384,7 @@ function ProgressBar({
           {label}
         </span>
         <span className={`text-xs tabular-nums ${isZ ? "" : "text-gray-500"}`} style={isZ ? { color: Z.muted } : undefined}>
-          {fmt(value)} <span style={{ color: isZ ? "rgba(255,255,255,0.2)" : "#d1d5db" }}>/</span> {fmt(meta)}
+          {fmt(v)} <span style={{ color: isZ ? "rgba(255,255,255,0.2)" : "#d1d5db" }}>/</span> {metaLabel}
         </span>
       </div>
       <div className={`h-2 overflow-hidden rounded-full ${isZ ? "" : "bg-gray-100"}`} style={isZ ? { backgroundColor: "rgba(255,255,255,0.08)" } : undefined}>
@@ -855,7 +862,7 @@ function DashFinanciero({
           factura_id: p.factura_id,
           numero_factura: facturaNumById[String(p.factura_id)] ?? "—",
           monto: Number(p.monto) || 0,
-          fecha_pago: p.fecha_pago.slice(0, 10),
+          fecha_pago: toCalendarDateStr(p.fecha_pago),
         })),
     [pagosPeriodo, facturaNumById]
   );
@@ -1019,7 +1026,12 @@ function DashFinanciero({
             <ProgressBar
               variant="zentra"
               label="Facturación mensual"
-              value={facturasValidas.filter((f) => enMesCalendarioActual(f.fecha)).reduce((s, f) => s + f.monto, 0)}
+              value={facturasValidas
+                .filter((f) => enMesCalendarioActual(toCalendarDateStr(f.fecha)))
+                .reduce((s, f) => {
+                  const t = Number(f.monto);
+                  return s + (Number.isFinite(t) ? t : 0);
+                }, 0)}
               meta={config.meta_facturacion_mensual}
               format="gs"
             />
@@ -1027,8 +1039,11 @@ function DashFinanciero({
               variant="zentra"
               label="Ventas mensuales"
               value={ventas
-                .filter((v) => enMesCalendarioActual(v.fecha.slice(0, 10)))
-                .reduce((s, v) => s + v.total, 0)}
+                .filter((v) => enMesCalendarioActual(toCalendarDateStr(v.fecha)))
+                .reduce((s, v) => {
+                  const t = Number(v.total);
+                  return s + (Number.isFinite(t) ? t : 0);
+                }, 0)}
               meta={config.meta_ventas_mensuales}
               format="gs"
             />

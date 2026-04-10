@@ -4,6 +4,7 @@ import {
   SORTEO_COMPROBANTE_ESTADO_VALIDACION_FIELD,
   SORTEO_COMPROBANTE_MOTIVO_VALIDACION_FIELD,
 } from "@/lib/chat/comprobante-validation-types";
+import { requireEmpresaTenantServiceRole } from "@/lib/chat/empresa-tenant-service-role";
 import { requireEmpresaChatSession } from "@/lib/chat/empresa-session";
 import {
   deleteOmnichannelRouteByMetaPhone,
@@ -281,12 +282,13 @@ function mapChatChannelRow(r: Record<string, unknown>): ChatChannelRow {
 }
 
 export async function fetchChatChannels(): Promise<ChatChannelRow[]> {
-  const { supabase } = await requireEmpresaChatSession();
+  const { supabase, empresa_id } = await requireEmpresaTenantServiceRole();
   const { data, error } = await supabase
     .from("chat_channels")
     .select(
       "id, empresa_id, type, meta_phone_number_id, nombre, provider, provider_channel_id, activo, config, created_at, updated_at"
     )
+    .eq("empresa_id", empresa_id)
     .order("created_at", { ascending: true });
 
   if (error) throw new Error(error.message);
@@ -294,7 +296,7 @@ export async function fetchChatChannels(): Promise<ChatChannelRow[]> {
 }
 
 export async function fetchChatChannelById(channelId: string): Promise<ChatChannelRow | null> {
-  const { supabase, empresa_id } = await requireEmpresaChatSession();
+  const { supabase, empresa_id } = await requireEmpresaTenantServiceRole();
   const id = channelId.trim();
   if (!id) return null;
   const { data, error } = await supabase
@@ -326,7 +328,7 @@ export type ChatChannelFormInput = {
 
 /** Crea o actualiza canal WhatsApp (Meta). Devuelve el id del canal. */
 export async function saveChatChannel(input: ChatChannelFormInput): Promise<string> {
-  const { supabase, empresa_id, dataSchema } = await requireEmpresaChatSession();
+  const { supabase, empresa_id, dataSchema } = await requireEmpresaTenantServiceRole();
   const pid = input.meta_phone_number_id.trim();
   if (!pid) throw new Error("Phone Number ID es obligatorio");
 
@@ -344,6 +346,8 @@ export async function saveChatChannel(input: ChatChannelFormInput): Promise<stri
       .eq("id", existingId)
       .eq("empresa_id", empresa_id)
       .maybeSingle();
+    previousMetaPhone =
+      (prevRow as { meta_phone_number_id?: string } | null)?.meta_phone_number_id?.trim() || null;
     const prev =
       prevRow?.config &&
       typeof prevRow.config === "object" &&
@@ -530,7 +534,7 @@ export async function approveComprobanteValidacion(validacionId: string): Promis
 }
 
 export async function deleteChatChannel(id: string): Promise<void> {
-  const { supabase, empresa_id } = await requireEmpresaChatSession();
+  const { supabase, empresa_id } = await requireEmpresaTenantServiceRole();
   const { data: prev } = await supabase
     .from("chat_channels")
     .select("meta_phone_number_id")
