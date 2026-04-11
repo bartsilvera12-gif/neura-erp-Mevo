@@ -53,7 +53,10 @@ export async function fetchChatConversations(
   filters?: ChatInboxFilters
 ): Promise<InboxConversation[]> {
   const { supabase, catalogSr, empresa_id, usuario_id } = await requireEmpresaTenantServiceRole();
-  /** Sin embed de `chat_queues` / `chat_agents`: en esquemas tenant PostgREST a veces no expone esa FK en caché y falla toda la petición. */
+  /**
+   * Sin embeds desde `chat_conversations`: en esquemas tenant PostgREST suele no tener en caché
+   * las FKs hacia `chat_channels` / `chat_queues` / `chat_agents` y falla el select anidado.
+   */
   let q = supabase
     .from("chat_conversations")
     .select(
@@ -69,8 +72,7 @@ export async function fetchChatConversations(
       contact_id,
       channel_id,
       flow_status,
-      human_taken_over,
-      chat_channels!chat_conversations_channel_id_fkey ( id, type, nombre )
+      human_taken_over
     `
     )
     .eq("empresa_id", empresa_id);
@@ -117,6 +119,36 @@ export async function fetchChatConversations(
   if (error) throw new Error(error.message);
   const list = convs ?? [];
   if (list.length === 0) return [];
+
+  const channelIds = [
+    ...new Set(
+      list
+        .map((c) => (c.channel_id as string | null | undefined)?.trim())
+        .filter((x): x is string => Boolean(x && x.length > 0))
+    ),
+  ];
+
+  let channelById: Record<string, { type: string; nombre: string | null }> = {};
+  if (channelIds.length > 0) {
+    const { data: chrows, error: chErr } = await supabase
+      .from("chat_channels")
+      .select("id, type, nombre")
+      .eq("empresa_id", empresa_id)
+      .in("id", channelIds);
+    if (chErr) throw new Error(chErr.message);
+    channelById = Object.fromEntries(
+      (chrows ?? []).map((r) => {
+        const rec = r as { id: string; type?: string | null; nombre?: string | null };
+        return [
+          rec.id,
+          {
+            type: (rec.type as string) ?? "whatsapp",
+            nombre: rec.nombre ?? null,
+          },
+        ];
+      })
+    );
+  }
 
   const queueIds = [
     ...new Set(
@@ -200,13 +232,11 @@ export async function fetchChatConversations(
 
   return list.map((row) => {
     const c = byId[row.contact_id as string];
-    const chRaw = row.chat_channels as
-      | { id?: string; type?: string; nombre?: string | null }
-      | null
-      | undefined;
-    const channelId = (row.channel_id as string) ?? chRaw?.id ?? "";
-    const channelType = (chRaw?.type as string) ?? "whatsapp";
-    const channelNombre = (chRaw?.nombre as string | null) ?? null;
+    const cid = (row.channel_id as string | null | undefined)?.trim() ?? "";
+    const chMeta = cid ? channelById[cid] : undefined;
+    const channelId = cid;
+    const channelType = chMeta?.type ?? "whatsapp";
+    const channelNombre = chMeta?.nombre ?? null;
     const qid = (row.queue_id as string | null | undefined)?.trim() || null;
     const qRowNombre = qid ? queueNombreById[qid] : null;
     const aid = (row.assigned_agent_id as string | null | undefined)?.trim();
