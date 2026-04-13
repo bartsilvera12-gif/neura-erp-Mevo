@@ -3,6 +3,15 @@
 -- Sin hardcode de negocio en public. empresa_id siempre referencia zentra_erp.empresas.
 -- =============================================================================
 
+-- Bases que migraron de public pueden tener set_updated_at solo en public; los triggers NC lo requieren en zentra_erp.
+CREATE OR REPLACE FUNCTION zentra_erp.set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION zentra_erp.neura_install_nota_credito_tables(p_schema text)
 RETURNS void
 LANGUAGE plpgsql

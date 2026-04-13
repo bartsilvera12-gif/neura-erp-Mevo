@@ -1,5 +1,5 @@
 /**
- * Aplica supabase/migrations/20260407120000_empresa_sifen_actividad_economica.sql al proyecto remoto.
+ * Aplica supabase/migrations/20260407120001_empresa_sifen_actividad_economica.sql al proyecto remoto.
  * Requiere en .env.local: SUPABASE_DB_URL o (SUPABASE_DB_PASSWORD + NEXT_PUBLIC_SUPABASE_URL)
  *
  * npm run db:apply-sifen-actividad-economica
@@ -13,7 +13,7 @@ config({ path: join(process.cwd(), ".env.local") });
 
 const { Client } = pg;
 
-const MIGRATION = "20260407120000_empresa_sifen_actividad_economica.sql";
+const MIGRATION = "20260407120001_empresa_sifen_actividad_economica.sql";
 
 function getDbUrl(): string {
   const direct = process.env.SUPABASE_DB_URL?.trim();

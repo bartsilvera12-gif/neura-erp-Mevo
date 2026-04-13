@@ -28,7 +28,12 @@
     "db:rewrite-migrations-zentra": "tsx scripts/rewrite-migrations-public-to-zentra.ts",
     "db:verify-zentra-install": "tsx scripts/verify-zentra-erp-db-install.ts",
     "e2e:super-admin-sidebar": "tsx scripts/e2e-super-admin-modulos.ts",
-    "test:factura-post-tipo": "tsx scripts/validate-factura-post-tipo.ts"
+    "test:factura-post-tipo": "tsx scripts/validate-factura-post-tipo.ts",
+    "db:repair-migration-history": "tsx scripts/repair-remote-supabase-migration-history.ts",
+    "db:apply-nota-credito-fase1": "tsx scripts/apply-nota-credito-fase1-remote.ts",
+    "db:verify-nota-credito-db": "tsx scripts/verify-nota-credito-fase1-db.ts",
+    "db:verify-nota-credito-flow": "tsx scripts/verify-nota-credito-fase1-flow.ts",
+    "db:diagnose-migrations": "tsx scripts/diagnose-migration-history.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",
