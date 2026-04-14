@@ -2,7 +2,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getBrowserSupabaseForEmpresaData } from "@/lib/supabase/browser-data-client";
 import type { MarketingTask, NuevaMarketingTask } from "./types";
 
-interface TaskRow {
+export interface TaskRow {
   id: string;
   empresa_id: string;
   cliente_id: string;
@@ -20,7 +20,8 @@ interface TaskRow {
   updated_at: string;
 }
 
-function rowToTask(r: TaskRow): MarketingTask {
+/** Mapeo fila Supabase → modelo (reutilizable en API Marketing Ops). */
+export function rowToTask(r: TaskRow): MarketingTask {
   return {
     id:                       r.id,
     empresa_id:               r.empresa_id,

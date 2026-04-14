@@ -224,12 +224,25 @@ export async function previewSyncMarketing(opts: {
   };
 }
 
-/** Marca clientes con suscripción activa a plan marketing como tipo_servicio_cliente = marketing */
+export interface SincronizarClientesMarketingResultado {
+  /** Filas actualizadas correctamente */
+  actualizados: number;
+  /** Mensajes por cliente cuando el UPDATE falla o no afecta filas */
+  errores: string[];
+}
+
+/**
+ * Marca clientes con suscripción activa a plan marketing como tipo_servicio_cliente = marketing.
+ * En schemas tenant, `clientes.empresa_id` puede ser NULL o desalineado con el JWT; el UPDATE solo filtra por `id`
+ * y filas no eliminadas (el aislamiento real es el schema de datos de la empresa).
+ */
 export async function sincronizarClientesMarketing(
   empresa_id: string,
   supabaseClient: AppSupabaseClient
-): Promise<number> {
+): Promise<SincronizarClientesMarketingResultado> {
   const client = supabaseClient;
+  const errores: string[] = [];
+
   const { data: suscripciones } = await client
     .from("suscripciones")
     .select("cliente_id, plan_id")
@@ -237,7 +250,7 @@ export async function sincronizarClientesMarketing(
     .eq("estado", "activa")
     .not("plan_id", "is", null);
 
-  if (!suscripciones?.length) return 0;
+  if (!suscripciones?.length) return { actualizados: 0, errores: [] };
 
   const planIds = [...new Set(suscripciones.map((s) => s.plan_id).filter(Boolean))] as string[];
   const { data: planes } = await client
@@ -256,15 +269,26 @@ export async function sincronizarClientesMarketing(
 
   let actualizados = 0;
   for (const cid of clienteIdsAMarcar) {
-    const { error } = await client
+    const { data: updated, error } = await client
       .from("clientes")
       .update({ tipo_servicio_cliente: "marketing" })
       .eq("id", cid)
-      .eq("empresa_id", empresa_id);
+      .is("deleted_at", null)
+      .select("id");
 
-    if (!error) actualizados++;
+    if (error) {
+      errores.push(`${cid}: ${error.message}`);
+      continue;
+    }
+    if (!updated?.length) {
+      errores.push(
+        `${cid}: no se actualizó ninguna fila (¿cliente inactivo, eliminado o ID inexistente en este schema?)`
+      );
+      continue;
+    }
+    actualizados++;
   }
-  return actualizados;
+  return { actualizados, errores };
 }
 
 /** Genera tareas de marketing para un mes calendario. Respeta slots ya ocupados (manual o auto). */

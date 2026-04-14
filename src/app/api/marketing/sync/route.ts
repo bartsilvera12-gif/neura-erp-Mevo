@@ -78,21 +78,24 @@ export async function POST(request: NextRequest) {
     }
 
     const supabaseAdmin = ctx.supabase;
-    const clientesActualizados = await sincronizarClientesMarketing(empresaId, supabaseAdmin);
+    const syncCli = await sincronizarClientesMarketing(empresaId, supabaseAdmin);
     const resultado = await regenerarMesCompleto({
       empresa_id: empresaId,
       mes,
       supabaseClient: supabaseAdmin,
     });
 
+    const errores = [...syncCli.errores, ...resultado.errores];
+
     return NextResponse.json(
       successResponse({
         mes,
-        clientes_actualizados: clientesActualizados,
+        clientes_actualizados: syncCli.actualizados,
+        clientes_sincronizar_errores: syncCli.errores,
         tareas_eliminadas: resultado.eliminadas,
         tareas_generadas: resultado.generadas,
         tareas_omitidas: resultado.omitidas,
-        errores: resultado.errores,
+        errores,
       })
     );
   } catch (err) {
