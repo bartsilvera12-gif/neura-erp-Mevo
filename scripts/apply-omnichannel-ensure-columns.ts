@@ -1,5 +1,5 @@
 /**
- * Aplica supabase/migrations/20260416100000_ensure_omnichannel_etapa1_columns.sql
+ * Aplica migraciones idempotentes de columnas omnicanal (public + zentra_erp + tenant er_*).
  * Usa SUPABASE_DB_URL desde .env.local
  *
  * npm run db:apply-omnichannel-ensure
@@ -11,22 +11,27 @@ import pg from "pg";
 
 config({ path: join(process.cwd(), ".env.local") });
 
-const FILE = "20260416100000_ensure_omnichannel_etapa1_columns.sql";
+const FILES = [
+  "20260416100000_ensure_omnichannel_etapa1_columns.sql",
+  "20260417120000_chat_queues_etapa1_columns_all_schemas.sql",
+];
 
 async function main() {
   const url = process.env.SUPABASE_DB_URL?.trim();
   if (!url) {
     throw new Error("Falta SUPABASE_DB_URL en .env.local");
   }
-  const sql = readFileSync(join(process.cwd(), "supabase", "migrations", FILE), "utf-8");
   const client = new pg.Client({
     connectionString: url,
     ssl: url.includes("supabase") ? { rejectUnauthorized: false } : undefined,
   });
   await client.connect();
   try {
-    await client.query(sql);
-    console.log("OK:", FILE);
+    for (const FILE of FILES) {
+      const sql = readFileSync(join(process.cwd(), "supabase", "migrations", FILE), "utf-8");
+      await client.query(sql);
+      console.log("OK:", FILE);
+    }
   } finally {
     await client.end();
   }
