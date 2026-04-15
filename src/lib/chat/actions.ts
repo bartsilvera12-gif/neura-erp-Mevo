@@ -1,6 +1,11 @@
 "use server";
 
 import {
+  buildFlowSessionMap,
+  isActivelyBotHandledConversation,
+  type FlowSessionRowMin,
+} from "@/lib/chat/actively-bot-handled";
+import {
   SORTEO_COMPROBANTE_ESTADO_VALIDACION_FIELD,
   SORTEO_COMPROBANTE_MOTIVO_VALIDACION_FIELD,
   parseComprobanteValidationConfig,
@@ -105,9 +110,9 @@ export async function fetchChatConversations(
     q = q.in("status", ["open", "pending"]);
   } else if (vista === "bot") {
     q = q
-      .eq("flow_status", "bot")
       .eq("human_taken_over", false)
-      .in("status", ["open", "pending"]);
+      .in("status", ["open", "pending"])
+      .not("active_flow_session_id", "is", null);
   } else if (vista === "historial") {
     q = q.eq("status", "closed");
   }
@@ -160,26 +165,40 @@ export async function fetchChatConversations(
   if (error) throw new Error(error.message);
   let list = convs ?? [];
 
-  function rowFlowCode(row: Record<string, unknown>): string {
-    return String((row as { flow_code?: string | null }).flow_code ?? "").trim();
+  const sessionIds = [
+    ...new Set(
+      list
+        .map((row) =>
+          String((row as { active_flow_session_id?: string | null }).active_flow_session_id ?? "").trim()
+        )
+        .filter((id) => id.length > 0)
+    ),
+  ];
+  const flowSessionById = new Map<string, FlowSessionRowMin>();
+  const sessionChunk = 100;
+  for (let i = 0; i < sessionIds.length; i += sessionChunk) {
+    const chunk = sessionIds.slice(i, i + sessionChunk);
+    const { data: sessRows, error: sessErr } = await supabase
+      .from("chat_flow_sessions")
+      .select("id, status, flow_code, conversation_id")
+      .eq("empresa_id", empresa_id)
+      .in("id", chunk);
+    if (sessErr) {
+      console.warn("[fetchChatConversations] chat_flow_sessions:", sessErr.message);
+      continue;
+    }
+    for (const [k, v] of buildFlowSessionMap(sessRows as FlowSessionRowMin[]).entries()) {
+      flowSessionById.set(k, v);
+    }
   }
 
-  /** Bot = modo bot + código en flujo activo + sesión de flujo vigente (sin inferencias ni defaults a “bot”). */
-  function isBotConversationRow(row: Record<string, unknown>): boolean {
-    if (Boolean((row as { human_taken_over?: boolean }).human_taken_over)) return false;
-    const fs = String((row as { flow_status?: string | null }).flow_status ?? "").trim();
-    if (fs !== "bot") return false;
-    const fc = rowFlowCode(row);
-    if (!fc || !activeFlowCodeSet.has(fc)) return false;
-    const sid = String((row as { active_flow_session_id?: string | null }).active_flow_session_id ?? "").trim();
-    if (!sid) return false;
-    return true;
-  }
+  const isActivelyBot = (row: Record<string, unknown>) =>
+    isActivelyBotHandledConversation(row, activeFlowCodeSet, flowSessionById);
 
   if (vista === "inbox") {
-    list = list.filter((row) => !isBotConversationRow(row as Record<string, unknown>));
+    list = list.filter((row) => !isActivelyBot(row as Record<string, unknown>));
   } else if (vista === "bot") {
-    list = list.filter((row) => isBotConversationRow(row as Record<string, unknown>));
+    list = list.filter((row) => isActivelyBot(row as Record<string, unknown>));
   }
   if (list.length === 0) return [];
 
