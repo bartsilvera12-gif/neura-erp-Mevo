@@ -29,6 +29,7 @@ import {
   History,
   Activity,
   ScrollText,
+  ListChecks,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
@@ -93,6 +94,13 @@ const MENU_STRUCTURE: MenuItem[] = [
     label: "Historial omnicanal",
     href: "/dashboard/historial-omnicanal",
     icon: History,
+  },
+  {
+    key: "conversaciones-finalizadas",
+    slug: "conversaciones-finalizadas",
+    label: "Finalizadas",
+    href: "/dashboard/conversaciones-finalizadas",
+    icon: ListChecks,
   },
   {
     key: "monitoreo",

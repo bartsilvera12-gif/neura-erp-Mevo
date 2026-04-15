@@ -8,6 +8,7 @@ const SIDEBAR_SLUG_HREF_ORDER: { slug: string; href: string }[] = [
   { slug: "dashboard", href: "/" },
   { slug: "conversaciones", href: "/dashboard/conversaciones" },
   { slug: "historial-omnicanal", href: "/dashboard/historial-omnicanal" },
+  { slug: "conversaciones-finalizadas", href: "/dashboard/conversaciones-finalizadas" },
   { slug: "monitoreo", href: "/dashboard/monitoreo" },
   { slug: "ventas", href: "/ventas" },
   { slug: "inventario", href: "/inventario" },
@@ -44,7 +45,12 @@ export function canAccessSidebarSlug(
 ): boolean {
   if (esSuperAdmin) return true;
   if (slug === "dashboard") return grantedSlugs.has("dashboard");
-  if (slug === "conversaciones" || slug === "historial-omnicanal" || slug === "monitoreo") {
+  if (
+    slug === "conversaciones" ||
+    slug === "historial-omnicanal" ||
+    slug === "conversaciones-finalizadas" ||
+    slug === "monitoreo"
+  ) {
     return grantedSlugs.has("conversaciones") || grantedSlugs.has("omnicanal");
   }
   return isModuleSlugGranted(slug, grantedSlugs);
