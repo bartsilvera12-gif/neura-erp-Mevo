@@ -1,11 +1,13 @@
 "use server";
 
-import { requireEmpresaTenantServiceRole } from "@/lib/chat/empresa-tenant-service-role";
+import { requireEmpresaTenantServiceRole, type EmpresaTenantSrContext } from "@/lib/chat/empresa-tenant-service-role";
 import {
   appendOmnicanalConversationScopeToQuery,
   filterConversationIdsByOmnicanalScope,
   getOmnicanalScope,
   isOmnicanalAdminScope,
+  type OmnicanalConversationScopeCache,
+  type OmnicanalScope,
   resolveChatAgentIdsForUsuarios,
   resolveQueueIdsForUsuarios,
   shouldBypassOmnicanalConversationScope,
@@ -356,10 +358,13 @@ export type MonitoringUnassignedRow = {
   waiting_since: string;
 };
 
-export async function fetchMonitoringDashboard(): Promise<MonitoringDashboard> {
-  const { supabase, catalogSr, empresa_id, usuario_id } = await requireEmpresaTenantServiceRole();
-  const scope = await getOmnicanalScope(supabase, empresa_id, usuario_id);
-  const bypass = await shouldBypassOmnicanalConversationScope(catalogSr, usuario_id, scope);
+async function loadMonitoringDashboardForContext(
+  ctx: EmpresaTenantSrContext,
+  scope: OmnicanalScope,
+  bypass: boolean,
+  scopeConvCache: OmnicanalConversationScopeCache
+): Promise<MonitoringDashboard> {
+  const { supabase, catalogSr, empresa_id, usuario_id } = ctx;
 
   let queuesCountQ = supabase
     .from("chat_queues")
@@ -403,7 +408,7 @@ export async function fetchMonitoringDashboard(): Promise<MonitoringDashboard> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scopedConv = async (q: any) => {
     if (bypass) return { builder: q };
-    return appendOmnicanalConversationScopeToQuery(supabase, empresa_id, scope, q);
+    return appendOmnicanalConversationScopeToQuery(supabase, empresa_id, scope, q, scopeConvCache);
   };
 
   const [queuesRes, agentsRes] = await Promise.all([queuesCountQ, agentsCountQ]);
@@ -783,6 +788,13 @@ export async function fetchMonitoringDashboard(): Promise<MonitoringDashboard> {
   };
 }
 
+export async function fetchMonitoringDashboard(): Promise<MonitoringDashboard> {
+  const ctx = await requireEmpresaTenantServiceRole();
+  const scope = await getOmnicanalScope(ctx.supabase, ctx.empresa_id, ctx.usuario_id);
+  const bypass = await shouldBypassOmnicanalConversationScope(ctx.catalogSr, ctx.usuario_id, scope);
+  return loadMonitoringDashboardForContext(ctx, scope, bypass, {});
+}
+
 export type ChatAgentDirectoryRow = {
   id: string;
   queue_id: string;
@@ -803,9 +815,18 @@ export type ChatAgentDirectoryRow = {
 
 /** Agentes con nombre para reasignación y vistas de supervisor. */
 export async function listChatAgentsDirectory(): Promise<ChatAgentDirectoryRow[]> {
-  const { supabase, catalogSr, empresa_id, usuario_id } = await requireEmpresaTenantServiceRole();
-  const scope = await getOmnicanalScope(supabase, empresa_id, usuario_id);
-  const bypass = await shouldBypassOmnicanalConversationScope(catalogSr, usuario_id, scope);
+  const ctx = await requireEmpresaTenantServiceRole();
+  const scope = await getOmnicanalScope(ctx.supabase, ctx.empresa_id, ctx.usuario_id);
+  const bypass = await shouldBypassOmnicanalConversationScope(ctx.catalogSr, ctx.usuario_id, scope);
+  return listChatAgentsDirectoryWithContext(ctx, scope, bypass);
+}
+
+async function listChatAgentsDirectoryWithContext(
+  ctx: EmpresaTenantSrContext,
+  scope: OmnicanalScope,
+  bypass: boolean
+): Promise<ChatAgentDirectoryRow[]> {
+  const { supabase, catalogSr, empresa_id } = ctx;
 
   let aq = supabase
     .from("chat_agents")
@@ -943,9 +964,14 @@ export type SupervisorAgentLoadRow = ChatAgentDirectoryRow & {
   omnicanal_role: OmnicanalOperatorRole | null;
 };
 
-export async function fetchSupervisorAgentLoads(): Promise<SupervisorAgentLoadRow[]> {
-  const { supabase, catalogSr, empresa_id, usuario_id } = await requireEmpresaTenantServiceRole();
-  const agents = await listChatAgentsDirectory();
+async function loadSupervisorAgentLoadsWithContext(
+  ctx: EmpresaTenantSrContext,
+  scope: OmnicanalScope,
+  bypass: boolean,
+  scopeConvCache: OmnicanalConversationScopeCache
+): Promise<SupervisorAgentLoadRow[]> {
+  const { supabase, catalogSr, empresa_id } = ctx;
+  const agents = await listChatAgentsDirectoryWithContext(ctx, scope, bypass);
   if (agents.length === 0) return [];
 
   const roleByUsuario = await batchFetchOmnicanalOperatorRoles(
@@ -955,9 +981,6 @@ export async function fetchSupervisorAgentLoads(): Promise<SupervisorAgentLoadRo
   );
 
   const agentIds = agents.map((a) => a.id);
-  const scope = await getOmnicanalScope(supabase, empresa_id, usuario_id);
-  const bypass = await shouldBypassOmnicanalConversationScope(catalogSr, usuario_id, scope);
-
   let cq = supabase
     .from("chat_conversations")
     .select("assigned_agent_id, first_human_response_at, status")
@@ -966,7 +989,13 @@ export async function fetchSupervisorAgentLoads(): Promise<SupervisorAgentLoadRo
     .neq("status", "closed");
 
   if (!bypass) {
-    cq = (await appendOmnicanalConversationScopeToQuery(supabase, empresa_id, scope, cq)).builder;
+    cq = (await appendOmnicanalConversationScopeToQuery(
+      supabase,
+      empresa_id,
+      scope,
+      cq,
+      scopeConvCache
+    )).builder;
   }
 
   const { data: counts, error } = await cq;
@@ -992,6 +1021,53 @@ export async function fetchSupervisorAgentLoads(): Promise<SupervisorAgentLoadRo
     pending_first_reply: pendingFirst.get(a.id) ?? 0,
     omnicanal_role: roleByUsuario.get(a.usuario_id) ?? null,
   }));
+}
+
+export async function fetchSupervisorAgentLoads(): Promise<SupervisorAgentLoadRow[]> {
+  const ctx = await requireEmpresaTenantServiceRole();
+  const scope = await getOmnicanalScope(ctx.supabase, ctx.empresa_id, ctx.usuario_id);
+  const bypass = await shouldBypassOmnicanalConversationScope(ctx.catalogSr, ctx.usuario_id, scope);
+  return loadSupervisorAgentLoadsWithContext(ctx, scope, bypass, {});
+}
+
+/** Una sola ida servidor: métricas + tabla agentes + banner UX (Monitoreo). */
+export type MonitoreoPageData = {
+  dash: MonitoringDashboard;
+  agents: SupervisorAgentLoadRow[];
+  ux: {
+    omnicanal_role: OmnicanalOperatorRole | null;
+    bypass_catalog_rol: boolean;
+    team_agent_usuario_count: number;
+  };
+};
+
+export async function fetchMonitoreoPageData(): Promise<MonitoreoPageData> {
+  const t0 = Date.now();
+  const ctx = await requireEmpresaTenantServiceRole();
+  const scope = await getOmnicanalScope(ctx.supabase, ctx.empresa_id, ctx.usuario_id);
+  const bypass = await shouldBypassOmnicanalConversationScope(ctx.catalogSr, ctx.usuario_id, scope);
+  const scopeConvCache: OmnicanalConversationScopeCache = {};
+  const tParallel = Date.now();
+  const [dash, agents] = await Promise.all([
+    loadMonitoringDashboardForContext(ctx, scope, bypass, scopeConvCache),
+    loadSupervisorAgentLoadsWithContext(ctx, scope, bypass, scopeConvCache),
+  ]);
+  if (process.env.MONITOREO_TIMING_DEBUG === "1") {
+    console.info("[fetchMonitoreoPageData]", {
+      auth_scope_ms: tParallel - t0,
+      parallel_ms: Date.now() - tParallel,
+      total_ms: Date.now() - t0,
+    });
+  }
+  return {
+    dash,
+    agents,
+    ux: {
+      omnicanal_role: scope.role,
+      bypass_catalog_rol: bypass,
+      team_agent_usuario_count: scope.agentUsuarioIds.length,
+    },
+  };
 }
 
 export async function countUnassignedOpenConversations(): Promise<number> {

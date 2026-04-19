@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  fetchMonitoringDashboard,
-  fetchOmnicanalUxSummary,
-  fetchSupervisorAgentLoads,
+  fetchMonitoreoPageData,
   type MonitoringDashboard,
   type MonitoringPendingReplyAgentGroup,
   type MonitoringUnassignedRow,
@@ -49,13 +47,9 @@ export default function MonitoreoPage() {
     setLoading(true);
     setError(null);
     try {
-      const [d, a, ux] = await Promise.all([
-        fetchMonitoringDashboard(),
-        fetchSupervisorAgentLoads(),
-        fetchOmnicanalUxSummary(),
-      ]);
-      setDash(d);
-      setAgents(a);
+      const { dash, agents, ux } = await fetchMonitoreoPageData();
+      setDash(dash);
+      setAgents(agents);
       setUxRole(ux.omnicanal_role);
       setUxTeamCount(ux.team_agent_usuario_count);
     } catch (e) {

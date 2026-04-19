@@ -11,7 +11,7 @@ export type OmnicanalScope = {
   /** Rol en `chat_empresa_operator_roles`; null si no hay fila (ver `agentUsuarioIds` para fallback operador). */
   role: OmnicanalOperatorRole | null;
   /**
-   * Colas en `chat_queue_supervisors` (legacy / otros usos). Para conversaciones, el rol `supervisor` no filtra por esto.
+   * Colas en `chat_queue_supervisors` (se unen al alcance de colas de agentes a cargo en supervisión).
    */
   queueIds: string[];
   /**
@@ -209,6 +209,123 @@ export async function resolveQueueIdsForUsuarios(
   return [...new Set((data ?? []).map((r) => String((r as { queue_id?: string }).queue_id ?? "").trim()).filter(Boolean))];
 }
 
+/** Cache opcional por petición para evitar repetir lecturas del alcance supervisor (Monitoreo). */
+export type OmnicanalConversationScopeCache = {
+  supervisorBundlePromise?: Promise<SupervisorConversationScopeBundle>;
+};
+
+export type SupervisorConversationScopeBundle =
+  | { kind: "empty" }
+  | {
+      kind: "ok";
+      agentFkIds: string[];
+      queueIdsUnion: string[];
+      channelIdsFromTeamQueues: string[];
+    };
+
+/** Canales vinculados a las colas indicadas (`chat_queue_channels`). */
+export async function resolveChannelIdsForQueueIds(
+  supabase: AppSupabaseClient,
+  empresaId: string,
+  queueIds: string[]
+): Promise<string[]> {
+  const ids = [...new Set(queueIds.map((x) => normalizeId(x)).filter(Boolean))];
+  if (ids.length === 0) return [];
+  const { data, error } = await supabase
+    .from("chat_queue_channels")
+    .select("channel_id")
+    .eq("empresa_id", empresaId)
+    .in("queue_id", ids);
+  if (error) {
+    const m = (error.message ?? "").toLowerCase();
+    if (
+      m.includes("does not exist") ||
+      m.includes("schema cache") ||
+      m.includes("could not find") ||
+      m.includes("undefined_table") ||
+      m.includes("chat_queue_channels")
+    ) {
+      return [];
+    }
+    console.warn("[resolveChannelIdsForQueueIds]", error.message);
+    return [];
+  }
+  return [
+    ...new Set(
+      (data ?? []).map((r) => String((r as { channel_id?: string }).channel_id ?? "").trim()).filter(Boolean)
+    ),
+  ];
+}
+
+/** Resolución única para supervisor: equipo + colas ∪ colas supervisadas + canales enlazados a esas colas. */
+export async function resolveSupervisorConversationScopeBundle(
+  supabase: AppSupabaseClient,
+  empresaId: string,
+  scope: OmnicanalScope
+): Promise<SupervisorConversationScopeBundle> {
+  if (scope.role !== "supervisor") {
+    return { kind: "empty" };
+  }
+  const agentFkIds = await resolveChatAgentIdsForUsuarios(supabase, empresaId, scope.agentUsuarioIds);
+  const teamQueueIds = await resolveQueueIdsForUsuarios(supabase, empresaId, scope.agentUsuarioIds);
+  const queueIdsUnion = [...new Set([...teamQueueIds, ...(scope.queueIds ?? [])])];
+  const channelIdsFromTeamQueues =
+    queueIdsUnion.length > 0
+      ? await resolveChannelIdsForQueueIds(supabase, empresaId, queueIdsUnion)
+      : [];
+
+  if (agentFkIds.length === 0 && queueIdsUnion.length === 0 && channelIdsFromTeamQueues.length === 0) {
+    if ((scope.agentUsuarioIds?.length ?? 0) > 0) {
+      console.warn(
+        "[resolveSupervisorConversationScopeBundle] supervisor sin colas/canales resueltos; alcance vacío."
+      );
+    }
+    return { kind: "empty" };
+  }
+  return {
+    kind: "ok",
+    agentFkIds,
+    queueIdsUnion,
+    channelIdsFromTeamQueues,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applySupervisorBundleToQuery(
+  q: any,
+  b: Extract<SupervisorConversationScopeBundle, { kind: "ok" }>
+): any {
+  const ors: string[] = [];
+  if (b.agentFkIds.length > 0) {
+    const aIn = b.agentFkIds.map((id) => `"${normalizeId(id)}"`).join(",");
+    ors.push(`assigned_agent_id.in.(${aIn})`);
+  }
+  if (b.queueIdsUnion.length > 0) {
+    const qIn = b.queueIdsUnion.map((id) => `"${normalizeId(id)}"`).join(",");
+    ors.push(`and(assigned_agent_id.is.null,queue_id.in.(${qIn}))`);
+  }
+  if (b.channelIdsFromTeamQueues.length > 0) {
+    const cIn = b.channelIdsFromTeamQueues.map((id) => `"${normalizeId(id)}"`).join(",");
+    ors.push(`and(assigned_agent_id.is.null,channel_id.in.(${cIn}))`);
+  }
+  if (ors.length === 0) {
+    return q.eq("id", NO_CONVERSATION_MATCH);
+  }
+  if (ors.length === 1) {
+    const o = ors[0] as string;
+    if (o.startsWith("assigned_agent_id.in.(")) {
+      return q.in("assigned_agent_id", b.agentFkIds);
+    }
+    if (o.startsWith("and(assigned_agent_id.is.null,queue_id.in.(")) {
+      return q.is("assigned_agent_id", null).in("queue_id", b.queueIdsUnion);
+    }
+    if (o.startsWith("and(assigned_agent_id.is.null,channel_id.in.(")) {
+      return q.is("assigned_agent_id", null).in("channel_id", b.channelIdsFromTeamQueues);
+    }
+  }
+  return q.or(ors.join(","));
+}
+
 /** UUID imposible para forzar 0 filas (filtro inválido o alcance vacío). */
 export const OMNICANAL_IMPOSSIBLE_CONVERSATION_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -233,47 +350,28 @@ export async function appendOmnicanalConversationScopeToQuery(
   empresaId: string,
   scope: OmnicanalScope,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  q: any
+  q: any,
+  cache?: OmnicanalConversationScopeCache
 ): Promise<OmnicanalScopedPostgrestBuilder> {
   const wrap = (b: any): OmnicanalScopedPostgrestBuilder => ({ builder: b });
 
   if (isOmnicanalAdminScope(scope)) return wrap(q);
 
   /**
-   * Supervisor: conversaciones asignadas a agentes del equipo O sin asignar cuya cola esté en el
-   * alcance (colas de los agentes a cargo ∪ colas en `chat_queue_supervisors` si aplica).
+   * Supervisor: asignadas a agentes del equipo, o sin asignar con cola en alcance, o sin asignar cuyo
+   * canal esté vinculado a esas colas (cubre `queue_id` aún null en conversación).
    */
   if (scope.role === "supervisor") {
-    const agentFkIds = await resolveChatAgentIdsForUsuarios(supabase, empresaId, scope.agentUsuarioIds);
-    const teamQueueIds = await resolveQueueIdsForUsuarios(supabase, empresaId, scope.agentUsuarioIds);
-    const queueIdsUnion = [...new Set([...teamQueueIds, ...(scope.queueIds ?? [])])];
-
-    if (agentFkIds.length === 0 && queueIdsUnion.length === 0) {
-      if ((scope.agentUsuarioIds?.length ?? 0) > 0) {
-        console.warn(
-          "[appendOmnicanalConversationScopeToQuery] supervisor sin agentes activos ni colas resueltas; alcance vacío."
-        );
-      }
+    const bundle = await (() => {
+      if (cache?.supervisorBundlePromise) return cache.supervisorBundlePromise;
+      const p = resolveSupervisorConversationScopeBundle(supabase, empresaId, scope);
+      if (cache) cache.supervisorBundlePromise = p;
+      return p;
+    })();
+    if (bundle.kind === "empty") {
       return wrap(q.eq("id", NO_CONVERSATION_MATCH));
     }
-
-    const orParts: string[] = [];
-    if (agentFkIds.length > 0) {
-      const aIn = agentFkIds.map((id) => `"${normalizeId(id)}"`).join(",");
-      orParts.push(`assigned_agent_id.in.(${aIn})`);
-    }
-    if (queueIdsUnion.length > 0) {
-      const qIn = queueIdsUnion.map((id) => `"${normalizeId(id)}"`).join(",");
-      orParts.push(`and(assigned_agent_id.is.null,queue_id.in.(${qIn}))`);
-    }
-
-    if (orParts.length === 0) {
-      return wrap(q.eq("id", NO_CONVERSATION_MATCH));
-    }
-    if (orParts.length === 1) {
-      return wrap(q.or(orParts[0]));
-    }
-    return wrap(q.or(orParts.join(",")));
+    return wrap(applySupervisorBundleToQuery(q, bundle));
   }
 
   const agentFkIds = await resolveChatAgentIdsForUsuarios(supabase, empresaId, scope.agentUsuarioIds);
