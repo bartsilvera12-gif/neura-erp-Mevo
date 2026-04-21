@@ -11,6 +11,7 @@ import {
   insertProspectoForEmpresaPg,
   listProspectosForEmpresaPg,
   getProspectoForEmpresaPg,
+  logCrmFunnelProspectStageMatch,
 } from "@/lib/crm/crm-prospectos-pg";
 
 /**
@@ -28,6 +29,13 @@ export async function GET(request: NextRequest) {
     if (pool && isLikelyUnexposedTenantChatSchema(dataSchema)) {
       const pgList = await listProspectosForEmpresaPg(pool, dataSchema, ctx.auth.empresa_id);
       if (pgList !== null) {
+        await logCrmFunnelProspectStageMatch(
+          pool,
+          dataSchema,
+          ctx.auth.empresa_id,
+          pgList,
+          "postgres_directo"
+        );
         console.info("[crm-funnel][list]", "postgres_ok", {
           empresa_id: ctx.auth.empresa_id,
           data_schema: dataSchema,
@@ -43,6 +51,7 @@ export async function GET(request: NextRequest) {
     }
 
     const items = await listProspectosForEmpresa(ctx.supabase, ctx.auth.empresa_id);
+    await logCrmFunnelProspectStageMatch(null, undefined, ctx.auth.empresa_id, items, "postgrest_schema");
     console.info("[crm-funnel][list]", "postgrest_ok", {
       empresa_id: ctx.auth.empresa_id,
       data_schema: dataSchema,

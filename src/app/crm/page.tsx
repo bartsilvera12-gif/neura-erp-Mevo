@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Users, Calendar, PieChart, DollarSign, Trophy } from "lucide-react";
 import { getProspectos, moveProspecto } from "@/lib/crm/storage";
-import { getEtapas, getEtapaClasses, type EtapaCrm } from "@/lib/crm/etapas";
+import { getEtapas, getEtapaClasses, normalizeEtapaCodigo, type EtapaCrm } from "@/lib/crm/etapas";
 import type { Prospecto } from "@/lib/crm/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ function esMesActual(isoStr: string): boolean {
 
 /** Top 5 productos/planes en negociación por valor. servicio = "Plan A, Plan B", valor_estimado se reparte. */
 function topProductosEnNegociacion(prospectos: Prospecto[]): { nombre: string; valor: number }[] {
-  const enNeg = prospectos.filter((p) => p.etapa === "NEGOCIACION");
+  const enNeg = prospectos.filter((p) => normalizeEtapaCodigo(p.etapa) === "NEGOCIACION");
   const map: Record<string, number> = {};
   for (const p of enNeg) {
     const productos = p.servicio.split(",").map((s) => s.trim()).filter(Boolean);
@@ -98,10 +98,11 @@ function ProspectoCard({
   onDragStart: (id: string) => void;
   onMoverEtapa: (id: string, etapaCodigo: string) => void;
 }) {
-  const esGanado = prospecto.etapa === "GANADO";
-  const esPerdido = prospecto.etapa === "PERDIDO";
-  const hayGanado = etapas.some((e) => e.codigo === "GANADO");
-  const hayPerdido = etapas.some((e) => e.codigo === "PERDIDO");
+  const codigoProspecto = normalizeEtapaCodigo(prospecto.etapa);
+  const esGanado = codigoProspecto === "GANADO";
+  const esPerdido = codigoProspecto === "PERDIDO";
+  const hayGanado = etapas.some((e) => normalizeEtapaCodigo(e.codigo) === "GANADO");
+  const hayPerdido = etapas.some((e) => normalizeEtapaCodigo(e.codigo) === "PERDIDO");
 
   return (
     <div
@@ -327,6 +328,15 @@ export default function CrmPage() {
 
   useEffect(() => { recargar(); }, []);
 
+  useEffect(() => {
+    console.info("[crm-funnel][board-data]", {
+      context: "client",
+      etapas_count: etapas.length,
+      prospectos_count: prospectos.length,
+      codigos_columnas: etapas.map((e) => e.codigo),
+    });
+  }, [etapas, prospectos]);
+
   function handleDragStart(id: string) {
     dragIdRef.current = id;
   }
@@ -347,15 +357,20 @@ export default function CrmPage() {
     recargar();
   }
 
-  const porEtapa = (codigo: string) => prospectos.filter((p) => p.etapa === codigo);
+  const porEtapa = (codigo: string) =>
+    prospectos.filter((p) => normalizeEtapaCodigo(p.etapa) === normalizeEtapaCodigo(codigo));
 
   const leadsHoy = prospectos.filter((p) => esHoy(p.fecha_creacion)).length;
   const leadsMes = prospectos.filter((p) => esMesActual(p.fecha_creacion)).length;
-  const enNegociacion = prospectos.filter((p) => p.etapa === "NEGOCIACION");
+  const enNegociacion = prospectos.filter((p) => normalizeEtapaCodigo(p.etapa) === "NEGOCIACION");
   const valorNegociacion = enNegociacion.reduce((s, p) => s + p.valor_estimado, 0);
   const topProductos = topProductosEnNegociacion(prospectos);
-  const ganadosHoy = prospectos.filter((p) => p.etapa === "GANADO" && esHoy(p.fecha_actualizacion)).length;
-  const ganadosMes = prospectos.filter((p) => p.etapa === "GANADO" && esMesActual(p.fecha_actualizacion)).length;
+  const ganadosHoy = prospectos.filter(
+    (p) => normalizeEtapaCodigo(p.etapa) === "GANADO" && esHoy(p.fecha_actualizacion)
+  ).length;
+  const ganadosMes = prospectos.filter(
+    (p) => normalizeEtapaCodigo(p.etapa) === "GANADO" && esMesActual(p.fecha_actualizacion)
+  ).length;
 
   return (
     <div className="flex flex-col gap-3 h-full">

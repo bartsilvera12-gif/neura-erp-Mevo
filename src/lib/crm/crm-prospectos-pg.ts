@@ -1,12 +1,13 @@
 /**
  * CRM prospectos/notas en schema tenant vía Postgres (sin PostgREST para erp_* / er_* no expuestos).
  */
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
 import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 import { SUPABASE_APP_SCHEMA } from "@/lib/supabase/schema";
 import { nextNumeroControlFromLast } from "@/lib/crm/numero-control";
 import type { Nota, Prospecto } from "@/lib/crm/types";
+import { normalizeEtapaCodigo } from "@/lib/crm/etapas";
 
 const LOG_LIST = "[crm-prospectos-pg][list]";
 
@@ -45,7 +46,7 @@ function rowToProspectoPg(row: ProspectoRowPg, notas: Nota[]): Prospecto {
     telefono: row.telefono != null ? String(row.telefono) : undefined,
     servicio: String(row.servicio ?? ""),
     valor_estimado: Number(row.valor_estimado ?? 0),
-    etapa: String(row.etapa ?? ""),
+    etapa: normalizeEtapaCodigo(String(row.etapa ?? "")),
     proxima_accion: row.proxima_accion != null ? String(row.proxima_accion) : undefined,
     fecha_proxima_accion: row.fecha_proxima_accion != null ? String(row.fecha_proxima_accion) : undefined,
     creado_por: row.creado_por != null ? String(row.creado_por) : undefined,
@@ -457,6 +458,153 @@ export async function prospectoExistsForEmpresaPg(
   } catch {
     return false;
   }
+}
+
+const LOG_BOARD = "[crm-funnel]";
+
+/**
+ * Schemas tenant clonados suelen tener `crm_etapas` vacío: el Kanban no renderiza columnas
+ * aunque `crm_prospectos.etapa` tenga text (p. ej. LEAD). Idempotente.
+ */
+export async function ensureDefaultCrmEtapasForCrmSchemaClient(
+  client: PoolClient,
+  crmSchema: string,
+  empresaId: string
+): Promise<{ inserted: boolean }> {
+  const sch = assertAllowedChatDataSchema(crmSchema);
+  const ce = quoteSchemaTable(sch, "crm_etapas");
+  try {
+    const cnt = await client.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM ${ce} WHERE empresa_id = $1::uuid`,
+      [empresaId]
+    );
+    if (Number(cnt.rows[0]?.n) > 0) return { inserted: false };
+
+    await client.query(
+      `INSERT INTO ${ce} (empresa_id, codigo, nombre, color, orden, activo)
+       SELECT $1::uuid, v.codigo, v.nombre, v.color, v.orden, true
+       FROM (VALUES
+         ('LEAD'::text, 'Lead'::text, 'gray'::text, 1),
+         ('CONTACTADO', 'Contactado', 'blue', 2),
+         ('NEGOCIACION', 'Negociación', 'amber', 3),
+         ('GANADO', 'Ganado', 'green', 4),
+         ('PERDIDO', 'Perdido', 'red', 5)
+       ) AS v(codigo, nombre, color, orden)
+       ON CONFLICT (empresa_id, codigo) DO NOTHING`,
+      [empresaId]
+    );
+    console.info(LOG_BOARD, "crm_etapas_seed_defaults_client", {
+      empresa_id: empresaId,
+      crm_schema: sch,
+    });
+    return { inserted: true };
+  } catch (e) {
+    console.warn(LOG_BOARD, "crm_etapas_seed_defaults_client_failed", {
+      empresa_id: empresaId,
+      crm_schema: sch,
+      error: e instanceof Error ? e.message : e,
+    });
+    return { inserted: false };
+  }
+}
+
+/** Misma semántica que `ensureDefaultCrmEtapasForCrmSchemaClient` para rutas API (pool). */
+export async function ensureDefaultCrmEtapasPg(
+  pool: Pool,
+  tenantDataSchema: string,
+  empresaId: string
+): Promise<boolean> {
+  const resolved = await resolveCrmProspectosSchemaForTenant(pool, tenantDataSchema);
+  if (!resolved) return false;
+  const sch = assertAllowedChatDataSchema(resolved.crmSchema);
+  const ce = quoteSchemaTable(sch, "crm_etapas");
+  try {
+    const cnt = await pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM ${ce} WHERE empresa_id = $1::uuid`,
+      [empresaId]
+    );
+    if (Number(cnt.rows[0]?.n) > 0) return false;
+
+    await pool.query(
+      `INSERT INTO ${ce} (empresa_id, codigo, nombre, color, orden, activo)
+       SELECT $1::uuid, v.codigo, v.nombre, v.color, v.orden, true
+       FROM (VALUES
+         ('LEAD'::text, 'Lead'::text, 'gray'::text, 1),
+         ('CONTACTADO', 'Contactado', 'blue', 2),
+         ('NEGOCIACION', 'Negociación', 'amber', 3),
+         ('GANADO', 'Ganado', 'green', 4),
+         ('PERDIDO', 'Perdido', 'red', 5)
+       ) AS v(codigo, nombre, color, orden)
+       ON CONFLICT (empresa_id, codigo) DO NOTHING`,
+      [empresaId]
+    );
+    console.info(LOG_BOARD, "crm_etapas_seed_defaults_pg", {
+      empresa_id: empresaId,
+      data_schema: tenantDataSchema,
+      crm_schema: sch,
+    });
+    return true;
+  } catch (e) {
+    console.warn(LOG_BOARD, "crm_etapas_seed_defaults_pg_failed", {
+      empresa_id: empresaId,
+      error: e instanceof Error ? e.message : e,
+    });
+    return false;
+  }
+}
+
+/** Logs diagnóstico: prospectos vs etapas activas (match Kanban). */
+export async function logCrmFunnelProspectStageMatch(
+  pool: Pool | null,
+  tenantDataSchema: string | undefined,
+  empresaId: string,
+  prospectos: Prospecto[],
+  modo: string
+): Promise<void> {
+  const dist: Record<string, number> = {};
+  for (const p of prospectos) {
+    const k = normalizeEtapaCodigo(p.etapa);
+    const key = k || "(vacío)";
+    dist[key] = (dist[key] ?? 0) + 1;
+  }
+
+  let codigosActivos: string[] = [];
+  if (pool && tenantDataSchema) {
+    const resolved = await resolveCrmProspectosSchemaForTenant(pool, tenantDataSchema);
+    if (resolved) {
+      const sch = assertAllowedChatDataSchema(resolved.crmSchema);
+      const ce = quoteSchemaTable(sch, "crm_etapas");
+      try {
+        const r = await pool.query<{ codigo: string }>(
+          `SELECT codigo::text FROM ${ce}
+           WHERE empresa_id = $1::uuid AND activo = true`,
+          [empresaId]
+        );
+        codigosActivos = (r.rows ?? []).map((x) => normalizeEtapaCodigo(x.codigo));
+      } catch {
+        codigosActivos = [];
+      }
+    }
+  }
+
+  const activoSet = new Set(codigosActivos);
+  let sinColumna = 0;
+  if (activoSet.size > 0) {
+    for (const p of prospectos) {
+      const e = normalizeEtapaCodigo(p.etapa);
+      if (!e || !activoSet.has(e)) sinColumna += 1;
+    }
+  }
+
+  console.info("[crm-funnel][prospect-stage-match]", {
+    empresa_id: empresaId,
+    data_schema: tenantDataSchema ?? "",
+    modo,
+    prospectos: prospectos.length,
+    etapas_activas: codigosActivos.length,
+    distribucion_etapa_en_prospecto: dist,
+    prospectos_sin_columna_kanban: sinColumna,
+  });
 }
 
 /** Etapas activas en el mismo schema CRM que prospectos (`crm_etapas`). */

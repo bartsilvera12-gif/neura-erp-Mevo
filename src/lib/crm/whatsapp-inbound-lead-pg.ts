@@ -8,7 +8,12 @@ import type { Pool } from "pg";
 import { quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
 import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 import { SUPABASE_APP_SCHEMA } from "@/lib/supabase/schema";
-import { resolveCrmProspectosSchemaForTenant, whatsappCrmLogs } from "@/lib/crm/crm-prospectos-pg";
+import {
+  ensureDefaultCrmEtapasForCrmSchemaClient,
+  resolveCrmProspectosSchemaForTenant,
+  whatsappCrmLogs,
+} from "@/lib/crm/crm-prospectos-pg";
+import { normalizeEtapaCodigo } from "@/lib/crm/etapas";
 import { nextNumeroControlFromLast } from "@/lib/crm/numero-control";
 
 const LOG = "[crm][whatsapp-inbound-lead-pg]";
@@ -65,6 +70,9 @@ export async function ensureWhatsappInboundCrmLeadPg(input: {
       };
     }
     const crmSchema = resolved.crmSchema;
+
+    await ensureDefaultCrmEtapasForCrmSchemaClient(client, crmSchema, input.empresa_id);
+
     console.info(whatsappCrmLogs.FIND, "crm_schema_resolved", {
       schema_chat: schema,
       crm_schema: crmSchema,
@@ -92,7 +100,7 @@ export async function ensureWhatsappInboundCrmLeadPg(input: {
         etRows.find((r) => r.codigo && !terminal.has(String(r.codigo).toUpperCase()))?.codigo ??
         etRows[0]?.codigo ??
         "LEAD";
-      etapaCodigo = String(etapaCodigo || "LEAD").trim() || "LEAD";
+      etapaCodigo = normalizeEtapaCodigo(String(etapaCodigo || "LEAD")) || "LEAD";
       console.info(whatsappCrmLogs.STAGE, "initial_etapa", {
         schema_chat: schema,
         crm_schema: crmSchema,

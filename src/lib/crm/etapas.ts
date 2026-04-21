@@ -14,6 +14,11 @@ export interface EtapaCrm {
   updated_at: string;
 }
 
+/** Igualdad estable Kanban vs `crm_prospectos.etapa` (trim + mayúsculas). */
+export function normalizeEtapaCodigo(c: string | undefined | null): string {
+  return String(c ?? "").trim().toUpperCase();
+}
+
 interface EtapaRow {
   id: string;
   empresa_id: string;

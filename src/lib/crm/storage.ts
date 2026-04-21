@@ -1,6 +1,7 @@
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { getBrowserSupabaseForEmpresaData } from "@/lib/supabase/browser-data-client";
 import { createServiceRoleClientForEmpresa } from "@/lib/supabase/empresa-data-schema";
+import { normalizeEtapaCodigo } from "@/lib/crm/etapas";
 import { getCurrentUser } from "@/lib/auth";
 import type { AppSupabaseClient } from "@/lib/supabase/schema";
 import type { Prospecto, Nota } from "./types";
@@ -62,7 +63,7 @@ function rowToProspecto(row: ProspectoRow, notas: Nota[]): Prospecto {
     telefono: row.telefono ?? undefined,
     servicio: row.servicio,
     valor_estimado: Number(row.valor_estimado),
-    etapa: row.etapa,
+    etapa: normalizeEtapaCodigo(row.etapa ?? ""),
     proxima_accion: row.proxima_accion ?? undefined,
     fecha_proxima_accion: row.fecha_proxima_accion ?? undefined,
     creado_por: row.creado_por ?? undefined,
