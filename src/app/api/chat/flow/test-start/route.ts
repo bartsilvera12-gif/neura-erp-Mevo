@@ -82,19 +82,16 @@ export async function POST(request: NextRequest) {
       const cat = await listActiveWhatsappFlowsForEmpresa(supabase, empresaId);
       if (cat.kind === "single") {
         flowCode = cat.flowCode;
-      } else if (cat.kind === "none") {
-        return NextResponse.json(
-          { ok: false, error: "No hay flujos WhatsApp activos; activá uno o pasá flow_code en el body." },
-          { status: 400 }
-        );
+        if (cat.ambiguous) {
+          console.warn("[api/chat/flow/test-start] ambiguous_catalog_using_canonical", {
+            empresaId,
+            chosen: flowCode,
+            allActiveCodes: cat.allActiveCodes,
+          });
+        }
       } else {
         return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "Hay varios flujos WhatsApp activos; indicá flow_code explícito en el body para test-start.",
-            active_flow_codes: cat.flowCodes,
-          },
+          { ok: false, error: "No hay flujos WhatsApp activos; activá uno o pasá flow_code en el body." },
           { status: 400 }
         );
       }

@@ -168,8 +168,8 @@ const NO_AUTOMATION_SEND: BusinessAutomationInboundResult = {
  * Tras persistir el mensaje entrante: bienvenida (solo primer mensaje del hilo)
  * y/o aviso fuera de horario (con cooldown).
  *
- * El webhook usa los flags para no ejecutar el motor de flujos en el mismo mensaje
- * si ya se envió bienvenida o fuera de horario (evita múltiples respuestas simultáneas).
+ * El webhook solo omite el motor en ese mismo inbound si hubo mensaje fuera de horario
+ * (evita saturar); la bienvenida puede ejecutarse junto al primer nodo del flujo.
  */
 export async function runWhatsappBusinessAutomationAfterInbound(params: {
   supabase: SupabaseAdmin;

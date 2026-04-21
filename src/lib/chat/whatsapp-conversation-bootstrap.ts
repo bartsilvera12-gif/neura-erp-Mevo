@@ -43,12 +43,8 @@ export async function createWhatsappConversationWithActiveFlow(
       empresaId,
       flowCode: flowCodeIns,
       flow_current_node: nodeIns,
-    });
-  } else if (catalogNew.kind === "multiple") {
-    console.error("[whatsapp-conversation-bootstrap]", "multiple_active_flows", {
-      context: "new_conversation_insert",
-      empresaId,
-      activeFlowCodes: catalogNew.flowCodes,
+      ambiguous: catalogNew.ambiguous,
+      allActiveCodes: catalogNew.allActiveCodes,
     });
   } else {
     console.warn("[whatsapp-conversation-bootstrap]", "no_active_flow_found", {

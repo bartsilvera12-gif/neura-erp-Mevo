@@ -26,12 +26,26 @@ export async function deleteChatFlowDataForConversationFlow(
 }
 
 export type ActiveFlowsCatalogResult =
-  | { kind: "single"; flowCode: string }
-  | { kind: "none" }
-  | { kind: "multiple"; flowCodes: string[] };
+  | {
+      kind: "single";
+      /** Flujo por defecto si hay que elegir (orden `flow_code` ASC). */
+      flowCode: string;
+      /** Todos los flujos activos considerados WhatsApp (legacy puede tener `channel` null/vacío). */
+      allActiveCodes: string[];
+      ambiguous: boolean;
+    }
+  | { kind: "none" };
+
+const OMNI_FLOW = "[omnichannel-flow]" as const;
+
+function rowIsWhatsappChannel(row: { channel?: string | null }): boolean {
+  const ch = String(row.channel ?? "").trim().toLowerCase();
+  return !ch || ch === "whatsapp";
+}
 
 /**
- * Flujos marcados activos en catálogo para canal WhatsApp de la empresa.
+ * Flujos marcados activos para WhatsApp (canal `whatsapp`, null o vacío = legado).
+ * Si hay varios activos, `flowCode` es el primero por orden lexicográfico y `ambiguous=true`.
  */
 export async function listActiveWhatsappFlowsForEmpresa(
   supabase: SupabaseAdmin,
@@ -39,9 +53,8 @@ export async function listActiveWhatsappFlowsForEmpresa(
 ): Promise<ActiveFlowsCatalogResult> {
   const { data, error } = await supabase
     .from("chat_flows")
-    .select("flow_code")
+    .select("flow_code, channel")
     .eq("empresa_id", empresaId)
-    .eq("channel", "whatsapp")
     .eq("activo", true)
     .order("flow_code", { ascending: true });
 
@@ -50,10 +63,28 @@ export async function listActiveWhatsappFlowsForEmpresa(
     throw new Error(error.message);
   }
 
-  const codes = [...new Set((data ?? []).map((r) => String((r as { flow_code?: string }).flow_code ?? "").trim()).filter(Boolean))];
+  const codes = [
+    ...new Set(
+      (data ?? [])
+        .filter((r) => rowIsWhatsappChannel(r as { channel?: string | null }))
+        .map((r) => String((r as { flow_code?: string }).flow_code ?? "").trim())
+        .filter(Boolean)
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+
   if (codes.length === 0) return { kind: "none" };
-  if (codes.length === 1) return { kind: "single", flowCode: codes[0] };
-  return { kind: "multiple", flowCodes: codes };
+
+  const canonical = codes[0];
+  const ambiguous = codes.length > 1;
+  if (ambiguous) {
+    console.warn(OMNI_FLOW, "multiple_whatsapp_flows_using_canonical", {
+      empresaId,
+      chosen_flow_code: canonical,
+      allActiveCodes: codes,
+    });
+  }
+
+  return { kind: "single", flowCode: canonical, allActiveCodes: codes, ambiguous };
 }
 
 /**
@@ -90,9 +121,8 @@ export type SyncConversationFlowResult = {
 
 /**
  * Asigna o corrige flow_code / nodo inicial según catálogo activo.
- * - Un solo flujo activo: usa ese (nueva conv o conv con flujo inexistente/inactivo en catálogo).
- * - Varios activos: solo mantiene la conv si su flow_code ya está entre los activos; si no, no elige al azar.
- * - Ninguno activo: no rompe; deja la conv tal cual y loguea no_active_flow_found.
+ * - Varios flujos activos: si la conv ya tiene `flow_code` entre los activos, se conserva.
+ * - Si no hay flujo en conv o el código ya no está en catálogo → se asigna el canónico (primer `flow_code`).
  */
 export async function syncWhatsappConversationFlowFromCatalog(
   supabase: SupabaseAdmin,
@@ -110,21 +140,14 @@ export async function syncWhatsappConversationFlowFromCatalog(
     return { flow_code: currentFlow, flow_current_node: currentNode, changed: false };
   }
 
-  if (catalog.kind === "multiple") {
-    if (currentFlow && catalog.flowCodes.includes(currentFlow)) {
-      console.info(LOG, "resolved_active_flow", {
-        empresaId,
-        conversationId,
-        flowCode: currentFlow,
-        reason: "conversation_flow_already_among_multiple_active",
-      });
-      return { flow_code: currentFlow, flow_current_node: currentNode, changed: false };
-    }
-    console.error(LOG, "multiple_active_flows", {
+  const allActive = catalog.allActiveCodes;
+  if (currentFlow && allActive.includes(currentFlow)) {
+    console.info(LOG, "resolved_active_flow", {
       empresaId,
       conversationId,
-      activeFlowCodes: catalog.flowCodes,
-      conversationFlow: currentFlow,
+      flowCode: currentFlow,
+      reason: "conversation_flow_in_active_catalog",
+      ambiguous: catalog.ambiguous,
     });
     return { flow_code: currentFlow, flow_current_node: currentNode, changed: false };
   }
@@ -332,12 +355,7 @@ export async function restartWhatsappConversationToFlowStart(
     trigger: opts.trigger,
     preferFlowCode: opts.preferFlowCode ?? null,
     catalogKind: catalog.kind,
-    activeFlowCodes:
-      catalog.kind === "multiple"
-        ? catalog.flowCodes
-        : catalog.kind === "single"
-          ? [catalog.flowCode]
-          : [],
+    activeFlowCodes: catalog.kind === "single" ? catalog.allActiveCodes : [],
   });
   if (catalog.kind === "none") {
     console.warn(CONV_LOG, "conversation_restarted", {
@@ -349,24 +367,18 @@ export async function restartWhatsappConversationToFlowStart(
     return { flow_code: null, flow_current_node: null, restarted: false, reason: "no_active_flow" };
   }
 
-  let targetFlow: string | null = null;
-  if (catalog.kind === "single") {
-    targetFlow = catalog.flowCode;
-  } else {
-    const pref = opts.preferFlowCode?.trim() || null;
-    if (pref && catalog.flowCodes.includes(pref)) {
-      targetFlow = pref;
-    } else {
-      targetFlow = catalog.flowCodes[0] ?? null;
-      console.warn(CONV_LOG, "restart_target_resolved", {
-        conversationId,
-        detail: "multiple_active_flows_fallback_first_sorted",
-        activeFlowCodes: catalog.flowCodes,
-        preferFlowCode: pref,
-        chosenFlow: targetFlow,
-        trigger: opts.trigger,
-      });
-    }
+  const pref = opts.preferFlowCode?.trim() || null;
+  const codes = catalog.allActiveCodes;
+  let targetFlow: string | null =
+    pref && codes.includes(pref) ? pref : catalog.flowCode;
+  if (pref && !codes.includes(pref)) {
+    console.warn(CONV_LOG, "restart_prefer_not_in_catalog_using_canonical", {
+      conversationId,
+      preferFlowCode: pref,
+      chosenFlow: targetFlow,
+      activeFlowCodes: codes,
+      trigger: opts.trigger,
+    });
   }
 
   const firstNode = (await getFirstActiveNodeCodeForFlow(supabase, empresaId, targetFlow)) ?? "inicio";

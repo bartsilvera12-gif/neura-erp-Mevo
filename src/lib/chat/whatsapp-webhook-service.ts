@@ -680,54 +680,58 @@ export async function processInboundWebhookValue(
       /** Takeover por palabra/botón genérico: mensaje de confirmación tras persistir el entrante. */
       let keywordHandoffPendingConfirmation = false;
 
-      const startedInHumanMode = convHuman || convFlowStatus === "human";
-
       const restartKeywordMatch =
         message_type === "text" ? matchesConversationRestartKeyword(content) : false;
+
+      /**
+       * Reinicio por palabra (hola, menú, iniciar…): debe aplicar también si el chat estaba en modo humano,
+       * para poder volver al bot sin depender solo de conversaciones nuevas.
+       */
+      if (restartKeywordMatch) {
+        console.info(CONV_LOG, "restart_keyword_branch_entered", {
+          conversationId,
+          preferFlowCode: convFlow,
+          was_human: convHuman || convFlowStatus === "human",
+        });
+        const rrKw = await restartWhatsappConversationToFlowStart(supabase, empresaId, conversationId, {
+          preferFlowCode: convFlow,
+          trigger: "restart_keyword",
+        });
+        console.info(CONV_LOG, "restart_keyword_result", {
+          conversationId,
+          restarted: rrKw.restarted,
+          reason: rrKw.reason,
+          flow_code: rrKw.flow_code,
+          flow_current_node: rrKw.flow_current_node,
+        });
+        if (!rrKw.restarted) {
+          console.warn(CONV_LOG, "restart_keyword_no_op", {
+            conversationId,
+            reason: rrKw.reason,
+            convFlowBefore: convFlow,
+          });
+        }
+        if (rrKw.restarted) {
+          convFlow = rrKw.flow_code;
+          convNode = rrKw.flow_current_node;
+          convHuman = false;
+          convFlowStatus = "bot";
+          restartedThisMessage = true;
+        }
+      }
+
+      const startedInHumanMode = convHuman || convFlowStatus === "human";
       if (message_type === "text") {
-        console.info(CONV_LOG, "inbound_text_before_restart_check", {
+        console.info(CONV_LOG, "inbound_text_after_restart_keyword", {
           conversationId,
           contentLength: content.length,
           contentPreview: content.slice(0, 200),
-          contentJsonHead: JSON.stringify(content.slice(0, 120)),
           matchesRestartKeyword: restartKeywordMatch,
           startedInHumanMode,
         });
       }
 
       if (!startedInHumanMode) {
-        if (restartKeywordMatch) {
-          console.info(CONV_LOG, "restart_keyword_branch_entered", {
-            conversationId,
-            preferFlowCode: convFlow,
-          });
-          const rrKw = await restartWhatsappConversationToFlowStart(supabase, empresaId, conversationId, {
-            preferFlowCode: convFlow,
-            trigger: "restart_keyword",
-          });
-          console.info(CONV_LOG, "restart_keyword_result", {
-            conversationId,
-            restarted: rrKw.restarted,
-            reason: rrKw.reason,
-            flow_code: rrKw.flow_code,
-            flow_current_node: rrKw.flow_current_node,
-          });
-          if (!rrKw.restarted) {
-            console.warn(CONV_LOG, "restart_keyword_no_op", {
-              conversationId,
-              reason: rrKw.reason,
-              convFlowBefore: convFlow,
-            });
-          }
-          if (rrKw.restarted) {
-            convFlow = rrKw.flow_code;
-            convNode = rrKw.flow_current_node;
-            convHuman = false;
-            convFlowStatus = "bot";
-            restartedThisMessage = true;
-          }
-        }
-
         if (!restartedThisMessage) {
           const fc = convFlow?.trim() || null;
           const nc = convNode?.trim() || null;
@@ -782,7 +786,7 @@ export async function processInboundWebhookValue(
           }
         }
       } else {
-        console.info(CONV_LOG, "skip_restart_and_catalog_repair_human_mode", { conversationId });
+        console.info(CONV_LOG, "skip_catalog_repair_human_mode", { conversationId });
       }
 
       const metaButtonIdPre = extractMetaButtonId(msg);
@@ -951,8 +955,11 @@ export async function processInboundWebhookValue(
           err: e instanceof Error ? e.message : String(e),
         });
       }
-      const skipFlowForBusinessAutomation =
-        businessAutomationResult.sentWelcome || businessAutomationResult.sentAwayMessage;
+      /**
+       * Fuera de horario: evitamos amontonar respuesta automática + primer nodo del flujo en el mismo tick.
+       * Mensaje de bienvenida ya no bloquea el motor (antes el primer "hola" solo enviaba welcome y cortaba el flujo).
+       */
+      const skipFlowForBusinessAutomation = businessAutomationResult.sentAwayMessage;
 
       console.info(logW, "conversation_updated_unread", { conversationId });
 
