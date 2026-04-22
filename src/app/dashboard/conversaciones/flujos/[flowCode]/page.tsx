@@ -600,21 +600,29 @@ export default function FlowEditorPage() {
     );
     const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
     if (!res.ok || !json.ok) throw new Error(json.error ?? "No se pudo guardar nodo");
+
+    /** Sin esto, quien usa solo «Guardar paso» nunca mandaba PATCH de opciones → el texto del botón no persistía en BD. */
+    const snap = nodesRef.current.find((n) => n.id === node.id);
+    if (snap && (snap.node_type === "buttons" || snap.node_type === "list") && snap.options.length > 0) {
+      for (const o of snap.options) {
+        await persistOptionCore(snap, o, { toastSuccess: false, reason: "save_node_batch" });
+      }
+    }
   }
 
-  async function saveOption(node: FlowNode, opt: FlowNodeOption) {
-    setSuccess(null);
-    const live = nodesRef.current.find((n) => n.id === node.id);
-    const liveOpt = live?.options.find((o) => o.id === opt.id);
-    if (!live || !liveOpt) {
-      throw new Error("No se encontró la opción en el editor. Recargá la página.");
-    }
+  /**
+   * Persiste una opción (label, payload, siguiente paso). Usado desde «Guardar» por opción y desde «Guardar paso» en lote.
+   */
+  async function persistOptionCore(
+    live: FlowNode,
+    liveOpt: FlowNodeOption,
+    opts: { toastSuccess: boolean; reason?: string }
+  ) {
     const nextCode = liveOpt.next_node_code?.trim() || null;
     if ((live.node_type === "buttons" || live.node_type === "list") && !nextCode) {
       const msg =
         "Elegí un paso destino en «Va a» antes de guardar. Sin siguiente paso el botón no puede continuar el flujo.";
       setOptionSaveError((prev) => ({ ...prev, [liveOpt.id]: msg }));
-      // Importante: lanzar error para que el handler no ejecute reload() (reload borraba el mensaje con setError(null)).
       throw new Error(msg);
     }
     setOptionSaveError((prev) => {
@@ -647,7 +655,6 @@ export default function FlowEditorPage() {
       setOptionPayloadDrafts((prev) => ({ ...prev, [liveOpt.id]: stringifyOptionPayload(payloadParsed) }));
     }
 
-    /** Texto visible WhatsApp → solo columna `label`. No mezclar con `option_payload.opcion_label`. */
     const buttonLabel = liveOpt.label.trim().slice(0, 500);
     if (!buttonLabel) {
       throw new Error('Completá «Texto del botón» (o texto de la opción en lista) antes de guardar.');
@@ -665,6 +672,7 @@ export default function FlowEditorPage() {
       flowCode,
       node_code: live.node_code,
       option_id: liveOpt.id,
+      reason: opts.reason ?? "single_option",
       body: patchBody,
       label_from_ref: buttonLabel,
     });
@@ -714,7 +722,19 @@ export default function FlowEditorPage() {
       );
     }
     setError(null);
-    setSuccess(`Botón "${buttonLabel}" guardado.`);
+    if (opts.toastSuccess) {
+      setSuccess(`Botón "${buttonLabel}" guardado.`);
+    }
+  }
+
+  async function saveOption(node: FlowNode, opt: FlowNodeOption) {
+    setSuccess(null);
+    const live = nodesRef.current.find((n) => n.id === node.id);
+    const liveOpt = live?.options.find((o) => o.id === opt.id);
+    if (!live || !liveOpt) {
+      throw new Error("No se encontró la opción en el editor. Recargá la página.");
+    }
+    await persistOptionCore(live, liveOpt, { toastSuccess: true, reason: "guardar_opcion" });
   }
 
   async function createOption(node: FlowNode) {
@@ -1690,7 +1710,8 @@ export default function FlowEditorPage() {
                       <strong>3 respuestas tipo botón</strong> por mensaje. Con <strong>4 o más</strong> opciones se
                       envía automáticamente un <strong>mensaje de lista interactiva</strong> (hasta{" "}
                       <strong>10</strong> filas). El texto que ve el cliente es el del campo{" "}
-                      <strong>«Texto del botón»</strong>; guardá cada opción con el botón Guardar.
+                      <strong>«Texto del botón»</strong>. Se guarda al pulsar <strong>Guardar</strong> junto a la opción o
+                      al pulsar <strong>Guardar paso</strong> (ambos persisten los textos en la base).
                     </p>
                   )}
                   {node.options.map((opt) => (
