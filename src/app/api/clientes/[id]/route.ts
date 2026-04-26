@@ -5,6 +5,8 @@ import { API_ERRORS } from "@/lib/api/errors";
 import { getTenantSupabaseFromAuthWithRol } from "@/lib/supabase/tenant-api";
 import { createServiceRoleClient } from "@/lib/supabase/service-admin";
 import { fetchPerfilTributarioDetalle } from "@/lib/clientes/tributario-server";
+import { construirPatchActualizacionCliente, type ActualizarClienteInput } from "@/lib/clientes/storage";
+import { ensureSemillasCatalogoTipos, tipoServicioSlugValido } from "@/lib/clientes/tipo-servicio-catalogo";
 
 /**
  * GET /api/clientes/:id — un cliente de la empresa (mismo schema que el resto de APIs tenant).
@@ -84,6 +86,88 @@ export async function GET(
     }
 
     return NextResponse.json(successResponse(row));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Error";
+    return NextResponse.json(errorResponse(msg), { status: 500 });
+  }
+}
+
+/**
+ * PATCH /api/clientes/:id
+ * Actualización de ficha. Usa cliente Supabase con rol de servicio en el `data_schema` de la empresa
+ * (misma ruta que GET) para no depender de GRANT/PostgREST del `authenticated` en el navegador.
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const ctx = await getTenantSupabaseFromAuthWithRol(request);
+    if (!ctx) {
+      return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    }
+    const { auth, supabase } = ctx;
+    const { id: clienteId } = await params;
+    if (!clienteId) {
+      return NextResponse.json(errorResponse("id es obligatorio"), { status: 400 });
+    }
+
+    const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const datos = raw as ActualizarClienteInput;
+    const patch = construirPatchActualizacionCliente(datos);
+
+    const { data: existing, error: errExist } = await supabase
+      .from("clientes")
+      .select("id, deleted_at")
+      .eq("id", clienteId)
+      .eq("empresa_id", auth.empresa_id)
+      .maybeSingle();
+
+    if (errExist || !existing) {
+      return NextResponse.json(errorResponse("Cliente no encontrado"), { status: 404 });
+    }
+    const delAt = (existing as { deleted_at?: string | null }).deleted_at;
+    if (delAt != null && String(delAt).trim() !== "") {
+      return NextResponse.json(errorResponse("Cliente no encontrado"), { status: 404 });
+    }
+
+    if (datos.tipo_servicio_cliente !== undefined) {
+      const ts = patch.tipo_servicio_cliente;
+      if (ts !== null && ts !== undefined && String(ts).trim() !== "") {
+        const slug = String(ts).trim();
+        await ensureSemillasCatalogoTipos(supabase, auth.empresa_id);
+        const valido = await tipoServicioSlugValido(supabase, auth.empresa_id, slug);
+        if (!valido) {
+          return NextResponse.json(
+            errorResponse(
+              "tipo_servicio_cliente no existe en el catálogo de la empresa. Actualizá la lista en Configuración → CRM."
+            ),
+            { status: 400 }
+          );
+        }
+        patch.tipo_servicio_cliente = slug;
+      } else {
+        patch.tipo_servicio_cliente = null;
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("clientes")
+      .update(patch)
+      .eq("id", clienteId)
+      .eq("empresa_id", auth.empresa_id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[api/clientes/[id]] PATCH", { clienteId, message: error.message });
+      return NextResponse.json(errorResponse(error.message), { status: 400 });
+    }
+    if (!data) {
+      return NextResponse.json(errorResponse("Cliente no encontrado"), { status: 404 });
+    }
+
+    return NextResponse.json(successResponse(data));
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Error";
     return NextResponse.json(errorResponse(msg), { status: 500 });

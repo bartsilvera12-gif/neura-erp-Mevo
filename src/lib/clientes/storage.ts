@@ -256,7 +256,7 @@ export async function saveCliente(datos: NuevoClienteData): Promise<Cliente | nu
   return rowToCliente(data as SupabaseRow);
 }
 
-type ActualizarClienteInput = Omit<
+export type ActualizarClienteInput = Omit<
   Partial<Omit<Cliente, "id" | "codigo_cliente" | "created_at">>,
   "tipo_servicio_cliente"
 > & {
@@ -264,9 +264,8 @@ type ActualizarClienteInput = Omit<
   tipo_servicio_cliente?: string | null;
 };
 
-/** Actualiza cliente. RLS valida que pertenezca a la empresa del usuario. Falla (throw) si Supabase devuelve error. */
-export async function updateCliente(id: string, datos: ActualizarClienteInput): Promise<Cliente> {
-  const supabase = await getBrowserSupabaseForEmpresaData();
+/** Misma lógica que aplica el PATCH de API; centralizada para no desviar campos. */
+export function construirPatchActualizacionCliente(datos: ActualizarClienteInput): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
   if (datos.tipo_cliente !== undefined) patch.tipo_cliente = datos.tipo_cliente;
   if (datos.empresa !== undefined) patch.empresa = datos.empresa ?? null;
@@ -293,19 +292,32 @@ export async function updateCliente(id: string, datos: ActualizarClienteInput): 
   if (datos.estado !== undefined) patch.estado = datos.estado ?? null;
   if (datos.tipo_servicio_cliente !== undefined) patch.tipo_servicio_cliente = datos.tipo_servicio_cliente ?? null;
   patch.updated_at = new Date().toISOString();
+  return patch;
+}
 
-  const { data, error } = await supabase
-    .from("clientes")
-    .update(patch)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("[clientes] updateCliente:", error.message, error);
-    throw new Error(error.message || "Error al actualizar el cliente");
+/**
+ * Actualiza cliente vía **PATCH** tenant (rol servicio, mismo criterio que GET /api/clientes/:id).
+ * Evita «permission denied for table clientes» con PostgREST en el navegador en esquemas `erp_*` sin GRANT a `authenticated`.
+ */
+export async function updateCliente(id: string, datos: ActualizarClienteInput): Promise<Cliente> {
+  const res = await fetchWithSupabaseSession(`/api/clientes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(datos),
+  });
+  let json: { success?: boolean; data?: unknown; error?: string };
+  try {
+    json = (await res.json()) as { success?: boolean; data?: unknown; error?: string };
+  } catch {
+    throw new Error("Respuesta inválida del servidor al actualizar el cliente.");
   }
-  return rowToCliente(data as SupabaseRow);
+  if (!res.ok) {
+    throw new Error(json?.error ?? `Error ${res.status}`);
+  }
+  if (json?.success !== true || json.data == null || typeof json.data !== "object") {
+    throw new Error(json?.error ?? "Respuesta inválida al actualizar el cliente.");
+  }
+  return rowToCliente(json.data as SupabaseRow);
 }
 
 /**
