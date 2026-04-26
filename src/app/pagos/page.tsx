@@ -2,18 +2,18 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { enRangoCalendario, hoyYmdLocal, rangoDesdeHastaInputs, toCalendarDateStr } from "@/lib/fechas/calendario";
+import { enRangoCalendario, rangoDesdeHastaInputs, toCalendarDateStr } from "@/lib/fechas/calendario";
 import { getFacturas } from "@/lib/gestion-clientes/storage";
-import MontoInput from "@/components/ui/MontoInput";
 import { getClientes } from "@/lib/clientes/storage";
 import { etiquetaVisibleTipoServicio } from "@/lib/clientes/tipo-servicio-catalogo";
 import { useMapNombreTipoServicioCatalogo } from "@/lib/clientes/use-map-nombre-tipo-servicio";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
-import { apiCreatePago } from "@/lib/api/client";
+import { RegistrarPagoModal } from "@/components/pagos/RegistrarPagoModal";
 import type { Cliente } from "@/lib/clientes/types";
 import type { Factura } from "@/lib/gestion-clientes/types";
 
-const inputClass = "w-full border border-slate-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:outline-none bg-white text-sm";
+const inputClass =
+  "w-full border border-slate-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:outline-none bg-white text-sm";
 const labelClass = "block text-xs font-medium text-slate-500 mb-1";
 
 type TabPagos = "pendientes" | "cobrados";
@@ -47,8 +47,6 @@ export default function PagosPage() {
   const [cargandoCobrados, setCargandoCobrados] = useState(false);
   const [modalPago, setModalPago] = useState(false);
   const [facturaSeleccionada, setFacturaSeleccionada] = useState<Factura | null>(null);
-  const [formPago, setFormPago] = useState({ monto: "", fecha_pago: "", metodo_pago: "efectivo" as const, referencia: "" });
-  const [guardando, setGuardando] = useState(false);
   const [filtroDesde, setFiltroDesde] = useState("");
   const [filtroHasta, setFiltroHasta] = useState("");
   /** "" = todos, "__sin__" = sin clasificar, sino slug en minúsculas. */
@@ -208,34 +206,6 @@ export default function PagosPage() {
     },
     [clientes, mapNombreTipoServicio]
   );
-
-  async function handleRegistrarPago(e: React.FormEvent) {
-    e.preventDefault();
-    const f = facturaSeleccionada;
-    if (!f) return;
-    const monto = parseFloat(formPago.monto) || 0;
-    if (monto > f.saldo) {
-      alert("El monto del pago no puede superar el saldo pendiente de la factura.");
-      return;
-    }
-    setGuardando(true);
-    const result = await apiCreatePago({
-      factura_id: f.id,
-      monto,
-      fecha_pago: formPago.fecha_pago,
-      metodo_pago: formPago.metodo_pago,
-      referencia: formPago.referencia || undefined,
-    });
-    setGuardando(false);
-    if (result) {
-      setModalPago(false);
-      setFacturaSeleccionada(null);
-      getFacturas().then(setFacturas);
-      if (tab === "cobrados") fetchCobrados();
-    } else {
-      alert("Error al registrar el pago. Verifique que el monto no supere el saldo.");
-    }
-  }
 
   const METODO_LABELS: Record<string, string> = {
     efectivo: "Efectivo",
@@ -426,7 +396,6 @@ export default function PagosPage() {
                         type="button"
                         onClick={() => {
                           setFacturaSeleccionada(f);
-                          setFormPago({ monto: String(f.saldo), fecha_pago: hoyYmdLocal(), metodo_pago: "efectivo", referencia: "" });
                           setModalPago(true);
                         }}
                         className="text-xs font-medium text-[#0EA5E9] hover:underline"
@@ -624,53 +593,27 @@ export default function PagosPage() {
         </div>
       )}
 
-      {modalPago && facturaSeleccionada && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setModalPago(false)}>
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-800 mb-4">Registrar pago</h3>
-            <p className="text-sm text-slate-600 mb-4">
-              Factura {facturaSeleccionada.numero_factura} — Saldo: Gs. {facturaSeleccionada.saldo.toLocaleString("es-PY")}
-            </p>
-            <form onSubmit={handleRegistrarPago} className="space-y-4">
-              <div>
-                <label className={labelClass}>Monto</label>
-                <MontoInput
-                  value={formPago.monto}
-                  onChange={(n) => setFormPago((p) => ({ ...p, monto: String(n) }))}
-                  className={inputClass}
-                  required
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Fecha pago</label>
-                <input type="date" value={formPago.fecha_pago} onChange={(e) => setFormPago((p) => ({ ...p, fecha_pago: e.target.value }))} className={inputClass} required />
-              </div>
-              <div>
-                <label className={labelClass}>Método de pago</label>
-                <select value={formPago.metodo_pago} onChange={(e) => setFormPago((p) => ({ ...p, metodo_pago: e.target.value as "efectivo" }))} className={inputClass}>
-                  <option value="efectivo">Efectivo</option>
-                  <option value="transferencia">Transferencia</option>
-                  <option value="cheque">Cheque</option>
-                  <option value="tarjeta">Tarjeta</option>
-                  <option value="otro">Otro</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelClass}>Referencia</label>
-                <input type="text" value={formPago.referencia} onChange={(e) => setFormPago((p) => ({ ...p, referencia: e.target.value }))} className={inputClass} placeholder="Nº de comprobante" />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="submit" disabled={guardando} className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-                  Guardar
-                </button>
-                <button type="button" onClick={() => setModalPago(false)} className="border border-slate-200 px-4 py-2 rounded-lg text-sm hover:bg-slate-50">
-                  Cancelar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <RegistrarPagoModal
+        open={modalPago && !!facturaSeleccionada}
+        factura={
+          facturaSeleccionada
+            ? {
+                id: facturaSeleccionada.id,
+                numero_factura: facturaSeleccionada.numero_factura,
+                saldo: facturaSeleccionada.saldo,
+                moneda: facturaSeleccionada.moneda,
+              }
+            : null
+        }
+        onClose={() => {
+          setModalPago(false);
+          setFacturaSeleccionada(null);
+        }}
+        onExito={async () => {
+          getFacturas().then(setFacturas);
+          if (tab === "cobrados") fetchCobrados();
+        }}
+      />
     </div>
   );
 }

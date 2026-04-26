@@ -13,6 +13,7 @@ import {
   Receipt,
   SlidersHorizontal,
 } from "lucide-react";
+import { RegistrarPagoModal } from "@/components/pagos/RegistrarPagoModal";
 import { SifenEstadoBadge } from "@/components/sifen/SifenEstadoBadge";
 import { useFacturaSifenEstados } from "@/hooks/useFacturaSifenEstados";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
@@ -46,6 +47,13 @@ function formatFechaIso(iso: string) {
     const d = new Date(iso);
     return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
   } catch { return ""; }
+}
+
+/** Misma lógica que en Pagos: solo cobro si hay saldo y el estado de la factura lo permite. */
+function facturaPermiteCobro(f: Factura) {
+  if (f.saldo <= 0) return false;
+  if (f.estado === "Anulado" || f.estado === "Corregida NC") return false;
+  return true;
 }
 
 // ── Badges ────────────────────────────────────────────────────────────────────
@@ -94,12 +102,14 @@ const KUDE_SOLO_APROBADO_TIP =
 
 function FacturaRowAccionesSifen({
   facturaId,
-  clienteId,
+  puedeCobrar,
+  onCobrar,
   sifenAprobado,
 }: {
   facturaId: string;
-  clienteId: string;
   sifenAprobado: boolean;
+  puedeCobrar: boolean;
+  onCobrar?: () => void;
 }) {
   const kudeView = `/api/facturas/${facturaId}/sifen/kude`;
   const kudeDl = `/api/facturas/${facturaId}/sifen/kude?download=1`;
@@ -152,13 +162,16 @@ function FacturaRowAccionesSifen({
       >
         <Receipt className="w-4 h-4" strokeWidth={1.75} />
       </Link>
-      <Link
-        href={`/clientes/${clienteId}`}
-        className="ml-0.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900 whitespace-nowrap px-1.5 py-1 rounded-md hover:bg-slate-100"
-        title="Registrar cobro"
-      >
-        Cobrar
-      </Link>
+      {puedeCobrar && onCobrar ? (
+        <button
+          type="button"
+          onClick={onCobrar}
+          className="ml-0.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900 whitespace-nowrap rounded-md px-1.5 py-1 hover:bg-slate-100"
+          title="Registrar cobro (mismo formulario que en Pagos)"
+        >
+          Cobrar
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -599,6 +612,7 @@ function GestionClientesPageInner() {
   const [selected,  setSelected]  = useState<Cliente | null>(null);
   const [facturas,  setFacturas]  = useState<Factura[]>([]);
   const [modalFacturacion, setModalFacturacion] = useState(false);
+  const [facturaCobroModal, setFacturaCobroModal] = useState<Factura | null>(null);
   const [facturasDetalleAbierto, setFacturasDetalleAbierto] = useState(true);
   const [panelFiltrosFacturas, setPanelFiltrosFacturas] = useState(false);
 
@@ -1096,8 +1110,9 @@ function GestionClientesPageInner() {
                                 <td className="align-middle px-2 py-2.5 sm:px-3">
                                   <FacturaRowAccionesSifen
                                     facturaId={f.id}
-                                    clienteId={selected.id}
                                     sifenAprobado={sifenPorFactura[f.id]?.estado_sifen === "aprobado"}
+                                    puedeCobrar={facturaPermiteCobro(f)}
+                                    onCobrar={() => setFacturaCobroModal(f)}
                                   />
                                 </td>
                               </tr>
@@ -1137,6 +1152,23 @@ function GestionClientesPageInner() {
           onClose={() => setModalFacturacion(false)}
         />
       )}
+      <RegistrarPagoModal
+        open={!!facturaCobroModal}
+        factura={
+          facturaCobroModal
+            ? {
+                id: facturaCobroModal.id,
+                numero_factura: facturaCobroModal.numero_factura,
+                saldo: facturaCobroModal.saldo,
+                moneda: facturaCobroModal.moneda,
+              }
+            : null
+        }
+        onClose={() => setFacturaCobroModal(null)}
+        onExito={async () => {
+          if (selected) getFacturas(selected.id).then(setFacturas);
+        }}
+      />
     </div>
   );
 }
