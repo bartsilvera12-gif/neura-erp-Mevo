@@ -78,7 +78,9 @@ export function OmnichannelChannelCard({
     primary && ofType.length <= 1
       ? `/configuracion/canales/${primary.id}`
       : primary && ofType.length > 1
-        ? `/configuracion/canales?tipo=${def.type}`
+        ? def.type === "whatsapp"
+          ? `/configuracion/canales#whatsapp-canales`
+          : `/configuracion/canales?tipo=${def.type}`
         : `/configuracion/canales/nuevo?tipo=${def.type}`;
 
   return (
@@ -112,7 +114,7 @@ export function OmnichannelChannelCard({
           href={editHref}
           className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
         >
-          Editar
+          {ofType.length > 1 ? "Ver conexiones" : "Editar"}
         </Link>
       </div>
     </article>

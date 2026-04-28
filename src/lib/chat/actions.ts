@@ -781,6 +781,10 @@ export type ChatChannelRow = {
   config: Record<string, unknown>;
   created_at: string;
   updated_at?: string;
+  /** Sin exponer secretos; solo presente cuando el servidor puede calcularlo (p. ej. Postgres). */
+  meta_access_token_present?: boolean | null;
+  /** Presencia de API key YCloud en `config` sin exponer el valor. */
+  ycloud_api_key_present?: boolean | null;
 };
 
 function isoFromPgOrJson(v: unknown): string {
@@ -792,6 +796,8 @@ function isoFromPgOrJson(v: unknown): string {
 function mapChatChannelRow(r: Record<string, unknown>): ChatChannelRow {
   const mp = r.meta_phone_number_id;
   const upd = r.updated_at;
+  const metaTok = r.meta_access_token_present;
+  const ycKey = r.ycloud_api_key_present;
   return {
     id: r.id as string,
     empresa_id: r.empresa_id as string,
@@ -805,6 +811,9 @@ function mapChatChannelRow(r: Record<string, unknown>): ChatChannelRow {
     config_status: (r.config_status as string) ?? "incomplete",
     config: (typeof r.config === "object" && r.config !== null ? r.config : {}) as Record<string, unknown>,
     created_at: isoFromPgOrJson(r.created_at),
+    meta_access_token_present:
+      typeof metaTok === "boolean" ? metaTok : metaTok === null ? null : undefined,
+    ycloud_api_key_present: typeof ycKey === "boolean" ? ycKey : ycKey === null ? null : undefined,
     updated_at:
       upd === null || upd === undefined
         ? undefined
@@ -826,16 +835,64 @@ function postgrestMutationError(dataSchema: string, message: string): Error {
   return new Error(message);
 }
 
+async function enrichChatChannelsSecretFlagsFromPg(
+  dataSchema: string,
+  empresaId: string,
+  rows: ChatChannelRow[]
+): Promise<void> {
+  const pool = getChatPostgresPool();
+  if (!pool || rows.length === 0) return;
+  const qt = quoteSchemaTable(dataSchema, "chat_channels");
+  try {
+    const r = await pool.query(
+      `
+      SELECT id::text AS id,
+        (LOWER(TRIM(COALESCE(provider::text, ''))) = 'meta'
+          AND whatsapp_access_token IS NOT NULL
+          AND LENGTH(TRIM(COALESCE(whatsapp_access_token, ''))) > 0) AS meta_access_token_present,
+        (LOWER(TRIM(COALESCE(provider::text, ''))) = 'ycloud'
+          AND COALESCE(TRIM(config->>'ycloud_api_key'), '') <> '') AS ycloud_api_key_present
+      FROM ${qt}
+      WHERE empresa_id = $1::uuid
+    `,
+      [empresaId]
+    );
+    const byId = new Map<string, { m: boolean; y: boolean }>();
+    for (const row of r.rows ?? []) {
+      const rec = row as Record<string, unknown>;
+      byId.set(String(rec.id), {
+        m: Boolean(rec.meta_access_token_present),
+        y: Boolean(rec.ycloud_api_key_present),
+      });
+    }
+    for (const row of rows) {
+      const f = byId.get(row.id);
+      if (f) {
+        row.meta_access_token_present = f.m;
+        row.ycloud_api_key_present = f.y;
+      }
+    }
+  } catch {
+    /* flags opcionales */
+  }
+}
+
 async function tryFetchChatChannelsFromPg(
   dataSchema: string,
   empresaId: string
 ): Promise<ChatChannelRow[] | undefined> {
   const pool = getChatPostgresPool();
   if (!pool) return undefined;
+  const qt = quoteSchemaTable(dataSchema, "chat_channels");
   const q = `
     SELECT id, empresa_id, type, meta_phone_number_id, nombre, provider, provider_channel_id,
-           activo, connection_mode, config_status, config, created_at, updated_at
-    FROM ${quoteSchemaTable(dataSchema, "chat_channels")}
+           activo, connection_mode, config_status, config, created_at, updated_at,
+           (LOWER(TRIM(COALESCE(provider::text, ''))) = 'meta'
+             AND whatsapp_access_token IS NOT NULL
+             AND LENGTH(TRIM(COALESCE(whatsapp_access_token, ''))) > 0) AS meta_access_token_present,
+           (LOWER(TRIM(COALESCE(provider::text, ''))) = 'ycloud'
+             AND COALESCE(TRIM(config->>'ycloud_api_key'), '') <> '') AS ycloud_api_key_present
+    FROM ${qt}
     WHERE empresa_id = $1::uuid
     ORDER BY created_at ASC
   `;
@@ -885,7 +942,9 @@ export async function fetchChatChannels(): Promise<ChatChannelRow[]> {
     }
     throw new Error(error.message);
   }
-  return (data ?? []).map((r) => mapChatChannelRow(r as Record<string, unknown>));
+  const mapped = (data ?? []).map((r) => mapChatChannelRow(r as Record<string, unknown>));
+  await enrichChatChannelsSecretFlagsFromPg(dataSchema, empresa_id, mapped);
+  return mapped;
 }
 
 export async function fetchChatChannelById(channelId: string): Promise<ChatChannelRow | null> {
@@ -1481,6 +1540,45 @@ export async function saveChatChannel(input: ChatChannelFormInput): Promise<stri
     dataSchema,
   });
   return newId;
+}
+
+/**
+ * Activa o desactiva un canal WhatsApp sin borrar la fila ni credenciales guardadas.
+ * Meta: sincroniza `omnichannel_routes` igual que al guardar desde el formulario.
+ */
+export async function patchChatChannelActivo(channelId: string, activo: boolean): Promise<void> {
+  const id = channelId.trim();
+  if (!id) throw new Error("Canal inválido.");
+
+  const row = await fetchChatChannelById(id);
+  if (!row) throw new Error("Canal no encontrado.");
+  if (normalizeChannelType(row.type) !== "whatsapp") {
+    throw new Error("Solo se puede activar o desactivar canales WhatsApp desde este acceso.");
+  }
+
+  const prov = String(row.provider ?? "meta").trim().toLowerCase();
+  if (prov === "ycloud") {
+    await saveYCloudWhatsappChannel({
+      id: row.id,
+      nombre: row.nombre?.trim() || "WhatsApp (YCloud)",
+      activo,
+    });
+    return;
+  }
+
+  await saveChatChannel({
+    id: row.id,
+    nombre: row.nombre?.trim() || "WhatsApp",
+    meta_phone_number_id: row.meta_phone_number_id?.trim() || "",
+    provider_channel_id: row.provider_channel_id?.trim() || row.meta_phone_number_id?.trim() || "",
+    activo,
+    display_phone_number:
+      typeof row.config?.display_phone_number === "string" ? row.config.display_phone_number : "",
+    whatsapp_access_token: "",
+    meta_waba_id: typeof row.config?.meta_waba_id === "string" ? row.config.meta_waba_id : "",
+    meta_app_id: typeof row.config?.meta_app_id === "string" ? row.config.meta_app_id : "",
+    meta_verify_token: typeof row.config?.meta_verify_token === "string" ? row.config.meta_verify_token : "",
+  });
 }
 
 export type { ComprobanteValidacionListRow } from "@/lib/chat/comprobante-validation-types";

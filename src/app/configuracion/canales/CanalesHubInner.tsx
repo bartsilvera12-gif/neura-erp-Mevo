@@ -7,7 +7,11 @@ import { ChannelBadge, channelTypeLabel } from "@/components/chat/ChannelBadge";
 import { OmnichannelChannelCard } from "@/components/chat/OmnichannelChannelCard";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { normalizeChannelType } from "@/lib/chat/channel-type-utils";
-import { fetchChatChannels, type ChatChannelRow } from "@/lib/chat/actions";
+import {
+  fetchChatChannels,
+  patchChatChannelActivo,
+  type ChatChannelRow,
+} from "@/lib/chat/actions";
 import { OMNICHANNEL_CARD_DEFINITIONS } from "@/lib/chat/omnichannel-catalog";
 
 function hasOmnichannelFromModuleAccess(body: {
@@ -19,6 +23,33 @@ function hasOmnichannelFromModuleAccess(body: {
   return slugs.includes("conversaciones") || slugs.includes("omnicanal");
 }
 
+function channelIdentifierLine(r: ChatChannelRow): string {
+  const p = String(r.provider ?? "").toLowerCase();
+  if (p === "ycloud") {
+    const sid = typeof r.config?.ycloud_sender_id === "string" ? r.config.ycloud_sender_id : "";
+    const cid = typeof r.config?.ycloud_channel_id === "string" ? r.config.ycloud_channel_id : "";
+    const parts = [
+      sid.trim() && `Sender: ${sid.trim()}`,
+      cid.trim() && `Canal YCloud: ${cid.trim()}`,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : "—";
+  }
+  const mp = r.meta_phone_number_id?.trim();
+  return mp ? `Phone number ID: ${mp}` : "—";
+}
+
+function credentialsSummary(r: ChatChannelRow): string {
+  const p = String(r.provider ?? "").toLowerCase();
+  if (p === "ycloud") {
+    if (r.ycloud_api_key_present === true) return "API key guardada";
+    if (r.ycloud_api_key_present === false) return "Sin API key en ERP";
+    return r.config_status === "active" ? "Credenciales listas" : "Revisá API key YCloud";
+  }
+  if (r.meta_access_token_present === true) return "Token Meta guardado";
+  if (r.meta_access_token_present === false) return "Sin token Meta en ERP";
+  return r.config_status === "active" ? "Credenciales completas" : "Credenciales incompletas";
+}
+
 export function CanalesHubInner() {
   const searchParams = useSearchParams();
   const tipoFiltro = (searchParams?.get("tipo") ?? "").trim().toLowerCase();
@@ -27,6 +58,7 @@ export function CanalesHubInner() {
   const [rows, setRows] = useState<ChatChannelRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [toggleBusyId, setToggleBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,6 +100,31 @@ export function CanalesHubInner() {
     return rows.filter((r) => normalizeChannelType(r.type) === tipoFiltro);
   }, [rows, tipoFiltro]);
 
+  const whatsappChannels = useMemo(
+    () => rows.filter((r) => normalizeChannelType(r.type) === "whatsapp"),
+    [rows]
+  );
+
+  useEffect(() => {
+    if (tipoFiltro !== "whatsapp" || typeof document === "undefined") return;
+    requestAnimationFrame(() => {
+      document.getElementById("whatsapp-canales")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [tipoFiltro]);
+
+  async function handleToggleActive(row: ChatChannelRow, next: boolean) {
+    setToggleBusyId(row.id);
+    setError(null);
+    try {
+      await patchChatChannelActivo(row.id, next);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo actualizar el canal");
+    } finally {
+      setToggleBusyId(null);
+    }
+  }
+
   if (allowed === null) {
     return (
       <div className="flex items-center justify-center py-24 text-sm text-slate-400">Cargando…</div>
@@ -101,8 +158,8 @@ export function CanalesHubInner() {
           </nav>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Canales y comunicación</h1>
           <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-            Omnicanal: gestioná WhatsApp, redes sociales y email desde una misma arquitectura. Los canales sin
-            integración completa ya podés dejarlos preparados con credenciales base.
+            Podés tener varios WhatsApp por empresa (por ejemplo cobranzas, ventas o coexistencia YCloud). Cada uno es
+            una fila en el sistema; activalos o desactivalos sin perder la configuración guardada.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
@@ -136,16 +193,94 @@ export function CanalesHubInner() {
           ))}
         </div>
       ) : (
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 list-none p-0 m-0">
-          {OMNICHANNEL_CARD_DEFINITIONS.map((def) => (
-            <li key={def.type}>
-              <OmnichannelChannelCard def={def} rows={rows} />
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 list-none p-0 m-0">
+            {OMNICHANNEL_CARD_DEFINITIONS.map((def) => (
+              <li key={def.type}>
+                <OmnichannelChannelCard def={def} rows={rows} />
+              </li>
+            ))}
+          </ul>
+
+          <section
+            id="whatsapp-canales"
+            className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden scroll-mt-6"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-3">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">WhatsApp</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {whatsappChannels.length === 0
+                    ? "Aún no hay números configurados."
+                    : `${whatsappChannels.length} número${whatsappChannels.length === 1 ? "" : "s"} · cada ítem es un canal independiente`}
+                </p>
+              </div>
+              <Link
+                href="/configuracion/canales/nuevo?tipo=whatsapp"
+                className="inline-flex items-center justify-center shrink-0 rounded-xl bg-[#0EA5E9] px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-[#0284C7]"
+              >
+                Agregar WhatsApp
+              </Link>
+            </div>
+            {whatsappChannels.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-slate-500">
+                Creá el primero con el asistente (Meta Cloud API o coexistencia YCloud).
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-200">
+                {whatsappChannels.map((r) => (
+                  <li key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-slate-900 truncate">{r.nombre ?? "WhatsApp"}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        <span className="font-semibold uppercase tracking-wide text-slate-400">{r.provider}</span>
+                        {r.connection_mode ? (
+                          <span className="text-slate-400"> · {r.connection_mode}</span>
+                        ) : null}
+                        {" · "}
+                        <span
+                          className={
+                            r.activo && r.config_status === "active"
+                              ? "text-emerald-700"
+                              : r.activo
+                                ? "text-amber-700"
+                                : "text-slate-500"
+                          }
+                        >
+                          {r.activo ? (r.config_status === "active" ? "Activo" : "Activo · config. incompleta") : "Inactivo"}
+                        </span>
+                      </p>
+                      <p className="text-xs font-mono text-slate-600 mt-1 truncate" title={channelIdentifierLine(r)}>
+                        {channelIdentifierLine(r)}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-1">{credentialsSummary(r)}</p>
+                    </div>
+                    <label className="flex items-center gap-2 shrink-0 text-xs text-slate-700 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-300"
+                        checked={Boolean(r.activo)}
+                        disabled={toggleBusyId === r.id}
+                        onChange={(e) => void handleToggleActive(r, e.target.checked)}
+                        aria-label={`Canal ${r.nombre ?? r.id} activo`}
+                      />
+                      <span className="hidden sm:inline">{toggleBusyId === r.id ? "…" : "Operativo"}</span>
+                    </label>
+                    <Link
+                      href={`/configuracion/canales/${r.id}`}
+                      className="shrink-0 text-sm font-semibold text-[#0EA5E9] hover:underline"
+                    >
+                      Editar
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
       )}
 
-      {tipoFiltro && filteredRows.length > 0 && (
+      {tipoFiltro && tipoFiltro !== "whatsapp" && filteredRows.length > 0 && (
         <section className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide">
