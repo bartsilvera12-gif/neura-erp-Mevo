@@ -127,6 +127,28 @@ function aliasMatches(expected: string, ocr: string): boolean {
 }
 
 /**
+ * True si la referencia extraída por OCR coincide con identificadores bancarios configurados
+ * (cuenta, alias, RUC/dígitos en titular). Esa cadena no debe usarse como clave de duplicado
+ * fuerte: suele ser cuenta destino o dato estático repetido, no número de operación.
+ */
+export function ocrReferenciaMatchesConfiguredMerchantIdentifiers(
+  refRaw: string | null | undefined,
+  datos: DatosBancariosEsperadosConfig | undefined | null
+): boolean {
+  if (!datos || !(refRaw ?? "").trim()) return false;
+  const ref = (refRaw ?? "").trim();
+
+  if (datos.numero_cuenta.trim() && cuentaMatches(datos.numero_cuenta, ref)) return true;
+  if (datos.alias.trim() && aliasMatches(datos.alias, ref)) return true;
+
+  const titDig = normalizeBankAccountDigits(datos.titular);
+  const refDig = normalizeBankAccountDigits(ref);
+  if (titDig.length >= 6 && refDig.length >= 6 && titDig === refDig) return true;
+
+  return false;
+}
+
+/**
  * Si los regex no encontraron campos, o devolvieron algo que no coincide, pero el texto OCR
  * contiene los valores del canal, usamos esos (comprobantes sin etiquetas o extractor enganchando otro bloque).
  */

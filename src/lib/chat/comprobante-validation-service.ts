@@ -1,6 +1,10 @@
 import { createHash } from "crypto";
 import type { AppSupabaseClient } from "@/lib/supabase/schema";
 import {
+  MIN_OCR_REF_LENGTH_FOR_STRONG_DUPLICATE,
+  ocrReferenceUsableForStrongDuplicate,
+} from "@/lib/chat/comprobante-ocr-strong-dup-ref";
+import {
   COMPROBANTE_BUTTON_IDS,
   type ComprobanteEstadoValidacion,
   type ComprobanteValidationSettings,
@@ -20,7 +24,10 @@ import {
 } from "@/lib/chat/comprobante-validation-types";
 import { runGoogleVisionDocumentOcr } from "@/lib/chat/comprobante-vision-ocr";
 import { validateReceiptAmountAgainstFlow } from "@/lib/chat/comprobante-monto-flow-validation";
-import { validateReceiptBankDataAgainstExpected } from "@/lib/chat/comprobante-bank-data-validation";
+import {
+  ocrReferenciaMatchesConfiguredMerchantIdentifiers,
+  validateReceiptBankDataAgainstExpected,
+} from "@/lib/chat/comprobante-bank-data-validation";
 import {
   SORTEO_COMPROBANTE_MEDIA_ID_FIELD,
   SORTEO_COMPROBANTE_URL_FIELD,
@@ -30,38 +37,7 @@ export function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-/** Referencias OCR cortas o token genérico repetido en muchos comprobantes (ej. mismo dígito OCR en PY). Producción: ref 10 chars → 21 conversaciones distintas bloqueadas. */
-export const MIN_OCR_REF_LENGTH_FOR_STRONG_DUPLICATE = 12;
-
-/** Etiquetas de UI / palabras que no son número de operación bancaria. */
-const OCR_REF_STRONG_BLOCKLIST = new Set(
-  [
-    "CONCEPTO",
-    "VOLVER",
-    "INICIO",
-    "MENU",
-    "PAGAR",
-    "CANCELAR",
-    "CONTINUAR",
-    "ACEPTAR",
-    "TRANSFERENCIA",
-    "OPERACION",
-    "OPERACIÓN",
-    "COMPROBANTE",
-    "IMPORTE",
-    "MONTO",
-  ].map((s) => s.toUpperCase())
-);
-
-/** Solo refs que pueden usarse para bloqueo fuerte entre sesiones. */
-export function ocrReferenceUsableForStrongDuplicate(ref: string | null | undefined): string | null {
-  const r = (ref ?? "").trim().toUpperCase();
-  if (r.length < MIN_OCR_REF_LENGTH_FOR_STRONG_DUPLICATE) return null;
-  if (OCR_REF_STRONG_BLOCKLIST.has(r)) return null;
-  const compact = r.replace(/[^A-Z0-9]/g, "");
-  if (compact.length > 0 && OCR_REF_STRONG_BLOCKLIST.has(compact)) return null;
-  return r;
-}
+export { MIN_OCR_REF_LENGTH_FOR_STRONG_DUPLICATE, ocrReferenceUsableForStrongDuplicate };
 
 /**
  * Estados en los que un hash ya visto implica “no reenviar la misma imagen” para bloqueo temprano.
@@ -593,7 +569,17 @@ export async function runComprobanteValidationPipeline(ctx: PipelineCtx): Promis
       : null;
 
   const refStored = extracted.referencia.trim().toUpperCase() || null;
-  const refForDup = ocrReferenceUsableForStrongDuplicate(refStored);
+  let refForDup = ocrReferenceUsableForStrongDuplicate(refStored);
+  if (refForDup && ocrReferenciaMatchesConfiguredMerchantIdentifiers(refStored, settings.datos_bancarios_esperados)) {
+    console.info("[sorteo-comprobante][ocr-reference-ignored]", {
+      reason: "matches_expected_bank_account",
+      empresa_id: ctx.empresaId,
+      conversation_id: ctx.conversationId,
+      flow_session_id: sid,
+      ocr_ref_masked: maskComprobanteRefForLog(refStored),
+    });
+    refForDup = null;
+  }
 
   let ocrRefStrongDup = false;
   let ocrFingerprintWeakDup = false;
