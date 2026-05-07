@@ -23,7 +23,7 @@ export async function GET(request: NextRequest, ctx: RouteCtx) {
     let q = sb
       .from("chat_campaign_recipients")
       .select(
-        "id, row_number, phone_raw, phone_e164, status, validation_error, provider_message_id, mapped_variables_json, sent_at, failed_at, first_reply_at, created_at"
+        "id, row_number, phone_raw, phone_e164, status, validation_error, provider_message_id, mapped_variables_json, row_payload_json, sent_at, failed_at, first_reply_at, created_at"
       )
       .eq("campaign_id", campaignId)
       .eq("empresa_id", auth.empresaId);

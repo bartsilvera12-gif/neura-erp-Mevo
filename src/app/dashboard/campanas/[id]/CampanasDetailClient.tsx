@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import {
+  buildCampaignTemplatePreviewText,
+  extractBodyPlaceholderKeysOrdered,
+} from "@/lib/campaigns/campaign-placeholders-shared";
+import {
   extractQuickReplyButtonsFromTemplateComponents,
   type TemplateQuickReplyButton,
 } from "@/lib/campaigns/template-quick-reply-buttons";
@@ -66,6 +70,17 @@ type EvRow = {
   event_type: string;
   created_at: string;
   event_payload_json: unknown;
+};
+
+type RecipientRow = {
+  id: string;
+  row_number: number;
+  phone_e164: string;
+  status: string;
+  row_payload_json?: Record<string, string>;
+  mapped_variables_json?: Record<string, unknown>;
+  provider_message_id?: string | null;
+  first_reply_at?: string | null;
 };
 
 export default function CampanasDetailClient({ campaignId }: { campaignId: string }) {
@@ -131,19 +146,58 @@ export default function CampanasDetailClient({ campaignId }: { campaignId: strin
     return () => window.clearInterval(t);
   }, [campaign?.status, campaignId, load, campaign]);
 
-  const slots = useMemo(() => {
-    const vs = campaign?.template_components_json as unknown;
-    if (!vs || !Array.isArray(vs)) return [] as string[];
-    const body = (vs as { type?: string; text?: string }[]).find(
-      (c) => String(c.type ?? "").toUpperCase() === "BODY"
-    );
-    const text = body?.text ?? "";
-    const re = /\{\{(\d+)\}\}/g;
-    const out: string[] = [];
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) out.push(m[1]);
-    return [...new Set(out)].sort((a, b) => Number(a) - Number(b));
-  }, [campaign]);
+  const placeholderSlots = useMemo(() => {
+    const comps = campaign?.template_components_json as unknown;
+    return extractBodyPlaceholderKeysOrdered(Array.isArray(comps) ? comps : []);
+  }, [campaign?.template_components_json]);
+
+  const excelColumns = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of recipients as RecipientRow[]) {
+      const row = r.row_payload_json;
+      if (row && typeof row === "object") {
+        for (const k of Object.keys(row)) {
+          if (k.trim()) set.add(k);
+        }
+      }
+    }
+    return Array.from(set).sort((a, b) => (a === b ? 0 : a < b ? -1 : 1));
+  }, [recipients]);
+
+  useEffect(() => {
+    if (placeholderSlots.length === 0 || excelColumns.length === 0) return;
+    setMapping((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const slot of placeholderSlots) {
+        if ((next[slot] ?? "").trim()) continue;
+        if (excelColumns.includes(slot)) {
+          next[slot] = slot;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [campaignId, excelColumns, placeholderSlots]);
+
+  const previewText = useMemo(() => {
+    if (!campaign || placeholderSlots.length === 0) return null;
+    const first = (recipients as RecipientRow[])[0];
+    const row = first?.row_payload_json;
+    if (!row || typeof row !== "object") return null;
+    const mappedBySlot: Record<string, string> = {};
+    for (const slot of placeholderSlots) {
+      const col = (mapping[slot] ?? "").trim();
+      if (!col) continue;
+      mappedBySlot[slot] = String(row[col] ?? "").trim();
+    }
+    return buildCampaignTemplatePreviewText({
+      templateName: campaign.template_name,
+      languageCode: campaign.template_language,
+      componentsSnapshot: campaign.template_components_json as unknown[],
+      mappedBySlot,
+    });
+  }, [campaign, mapping, placeholderSlots, recipients]);
 
   const templateHasHeaderImage = useMemo(() => {
     const vs = campaign?.template_components_json as unknown;
@@ -323,6 +377,28 @@ export default function CampanasDetailClient({ campaignId }: { campaignId: strin
     await load();
   }
 
+  async function saveMapping() {
+    setBusy(true);
+    setErr(null);
+    const body: Record<string, string> = {};
+    for (const [k, v] of Object.entries(mapping)) {
+      const t = v.trim();
+      if (t) body[k] = t;
+    }
+    const res = await fetchWithSupabaseSession(`/api/campanas/${campaignId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ variable_mapping_json: body }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
+    setBusy(false);
+    if (!res.ok || !json.success) {
+      setErr(json.error ?? "No se pudo guardar el mapeo");
+      return;
+    }
+    await load();
+  }
+
   async function validateMapping() {
     setBusy(true);
     setErr(null);
@@ -378,7 +454,8 @@ export default function CampanasDetailClient({ campaignId }: { campaignId: strin
   }
 
   const canImport = campaign.status === "draft" || campaign.status === "ready";
-  const canLaunch = campaign.status === "draft" || campaign.status === "ready";
+  /** Tras validación exitosa el backend pasa a `ready`; envío solo en ese estado. */
+  const canLaunch = campaign.status === "ready";
   const canEditButtonActions = String(campaign.status ?? "") !== "cancelled";
   const lockButtonActionsSection = savingButtonActions || !canEditButtonActions;
 
@@ -439,27 +516,98 @@ export default function CampanasDetailClient({ campaignId }: { campaignId: strin
         ) : null}
       </section>
 
-      {slots.length > 0 ? (
-        <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-900">Mapeo de variables → columnas Excel</h2>
-          {slots.map((s) => (
-            <label key={s} className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="w-16 font-mono text-slate-600">{`{{${s}}}`}</span>
-              <input
-                className="flex-1 rounded border border-slate-300 px-2 py-1"
-                value={mapping[s] ?? ""}
-                onChange={(e) => setMapping((m) => ({ ...m, [s]: e.target.value }))}
-              />
-            </label>
-          ))}
-          <button
-            type="button"
-            disabled={busy || !canImport}
-            onClick={() => void validateMapping()}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
-            Validar destinatarios
-          </button>
+      {placeholderSlots.length > 0 ? (
+        <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Mapeo de variables</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              Cada variable del <strong>body</strong> de la plantilla debe corresponder a una columna del Excel. Si el
+              nombre de la columna coincide exactamente con la variable, se selecciona sola.
+            </p>
+          </div>
+
+          {excelColumns.length === 0 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Importá un archivo (.xlsx / .csv) para listar las columnas disponibles en los selectores.
+            </div>
+          ) : null}
+
+          <div className="overflow-x-auto rounded-lg border border-slate-100">
+            <table className="min-w-full divide-y divide-slate-100 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-medium uppercase text-slate-600">
+                <tr>
+                  <th className="px-3 py-2">Variable en plantilla</th>
+                  <th className="px-3 py-2">Columna del Excel</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {placeholderSlots.map((slot) => (
+                  <tr key={slot}>
+                    <td className="whitespace-nowrap px-3 py-2 font-mono text-slate-800">{`{{${slot}}}`}</td>
+                    <td className="px-3 py-2">
+                      <select
+                        className="w-full max-w-md rounded border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100"
+                        disabled={!canImport || busy}
+                        value={mapping[slot] ?? ""}
+                        onChange={(e) =>
+                          setMapping((m) => ({
+                            ...m,
+                            [slot]: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">— Elegí columna —</option>
+                        {excelColumns.map((col) => (
+                          <option key={col} value={col}>
+                            {col}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy || !canImport}
+              onClick={() => void saveMapping()}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Guardar mapeo
+            </button>
+            <button
+              type="button"
+              disabled={busy || !canImport}
+              onClick={() => void validateMapping()}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              Validar destinatarios
+            </button>
+          </div>
+
+          {campaign.status !== "ready" && placeholderSlots.length > 0 ? (
+            <p className="text-xs text-slate-500">
+              Cuando la validación sea correcta, el estado pasará a <strong>ready</strong> y podrás usar{" "}
+              <strong>Enviar ahora</strong>.
+            </p>
+          ) : null}
+
+          {previewText ? (
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+              <div className="text-xs font-medium text-slate-600">Vista previa (primera fila del Excel)</div>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-800">
+                {previewText}
+              </pre>
+            </div>
+          ) : placeholderSlots.length > 0 && excelColumns.length > 0 ? (
+            <p className="text-xs text-slate-500">
+              Completá el mapeo y/o revisá que la primera fila tenga datos para ver la vista previa sin placeholders.
+            </p>
+          ) : null}
         </section>
       ) : null}
 
@@ -623,7 +771,7 @@ export default function CampanasDetailClient({ campaignId }: { campaignId: strin
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          disabled={busy || !canLaunch}
+          disabled={busy || !canLaunch || campaign.total_count === 0}
           onClick={() => void launch()}
           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
         >
