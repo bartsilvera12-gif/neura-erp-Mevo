@@ -33,6 +33,9 @@ type LineaPreview = {
   fecha: string | null;
   monto_base: number;
   comision_estimada_linea: number;
+  cobrado_periodo: number;
+  saldo_pendiente: number;
+  pendiente_por_comisionar: number;
 };
 
 const PAGE = 800;
@@ -111,6 +114,13 @@ function parseEscalas(rows: Record<string, unknown>[] | null): EscalaPolitica[] 
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function saldoPendienteFactura(fac: FacturaPreviewRow, neto: number, pagadoFallback?: number): number {
+  const saldo = Number(fac.saldo);
+  if (Number.isFinite(saldo)) return roundMoney(Math.max(0, saldo));
+  if (pagadoFallback == null) return 0;
+  return roundMoney(Math.max(0, neto - pagadoFallback));
 }
 
 type EscalaProgreso = {
@@ -346,6 +356,8 @@ export async function GET(request: Request) {
         const clienteId = String(fac.cliente_id ?? "");
         const vid = clienteVendedor.get(clienteId) ?? null;
         const monto = Number(p.monto) || 0;
+        const net = netFact(fac);
+        const saldoPendiente = saldoPendienteFactura(fac, net);
         const fecha = p.fecha_pago != null ? String(p.fecha_pago) : null;
         pushLine(
           {
@@ -358,6 +370,9 @@ export async function GET(request: Request) {
             fecha,
             monto_base: monto,
             comision_estimada_linea: 0,
+            cobrado_periodo: roundMoney(monto),
+            saldo_pendiente: saldoPendiente,
+            pendiente_por_comisionar: saldoPendiente,
           },
           Boolean(vid),
           "pago"
@@ -379,6 +394,25 @@ export async function GET(request: Request) {
         if (chunk.length < PAGE) break;
       }
 
+      const pagosPeriodoPorFactura = new Map<string, number>();
+      const facturaIds = [...new Set(facturas.map((f) => String(f.id ?? "")).filter(Boolean))];
+      for (let i = 0; i < facturaIds.length; i += 120) {
+        const slice = facturaIds.slice(i, i + 120);
+        const { data: pagosPeriodo, error } = await sb
+          .from("pagos")
+          .select("factura_id, monto, fecha_pago")
+          .eq("empresa_id", empresaId)
+          .in("factura_id", slice)
+          .gte("fecha_pago", desdeYmd)
+          .lte("fecha_pago", hastaYmd);
+        if (error) throw new Error(error.message);
+        for (const p of pagosPeriodo ?? []) {
+          const fid = String((p as Record<string, unknown>).factura_id ?? "");
+          if (!fid) continue;
+          pagosPeriodoPorFactura.set(fid, (pagosPeriodoPorFactura.get(fid) ?? 0) + (Number((p as Record<string, unknown>).monto) || 0));
+        }
+      }
+
       for (const row of facturas) {
         const fac = row as unknown as FacturaPreviewRow;
         if (esFacturaAnuladaPreview(fac.estado) || esFacturaCorregidaNcPreview(fac.estado)) continue;
@@ -386,17 +420,23 @@ export async function GET(request: Request) {
         const vid = clienteVendedor.get(clienteId) ?? null;
         const net = netFact(fac);
         if (net <= 0) continue;
+        const fid = String(fac.id);
+        const cobradoPeriodo = roundMoney(pagosPeriodoPorFactura.get(fid) ?? 0);
+        const saldoPendiente = saldoPendienteFactura(fac, net);
         pushLine(
           {
             tipo: "factura_emitida",
             cliente_id: clienteId || null,
             cliente_label: clienteNombre.get(clienteId) ?? clienteId,
-            factura_id: String(fac.id),
+            factura_id: fid,
             numero_factura: fac.numero_factura ?? null,
             pago_id: null,
             fecha: fac.fecha ?? null,
             monto_base: net,
             comision_estimada_linea: 0,
+            cobrado_periodo: cobradoPeriodo,
+            saldo_pendiente: saldoPendiente,
+            pendiente_por_comisionar: 0,
           },
           Boolean(vid),
           "factura"
@@ -419,13 +459,18 @@ export async function GET(request: Request) {
 
       const maxFechaPorFactura = new Map<string, string>();
       const sumPagosPorFactura = new Map<string, number>();
+      const sumPagosPeriodoPorFactura = new Map<string, number>();
       for (const p of pagosHist) {
         const fid = String(p.factura_id ?? "");
         if (!fid) continue;
         const fp = p.fecha_pago != null ? String(p.fecha_pago).slice(0, 10) : "";
         const prev = maxFechaPorFactura.get(fid);
         if (!prev || fp > prev) maxFechaPorFactura.set(fid, fp);
-        sumPagosPorFactura.set(fid, (sumPagosPorFactura.get(fid) ?? 0) + (Number(p.monto) || 0));
+        const montoPago = Number(p.monto) || 0;
+        sumPagosPorFactura.set(fid, (sumPagosPorFactura.get(fid) ?? 0) + montoPago);
+        if (fp >= desdeYmd && fp <= hastaYmd) {
+          sumPagosPeriodoPorFactura.set(fid, (sumPagosPeriodoPorFactura.get(fid) ?? 0) + montoPago);
+        }
       }
 
       const candidatos = [...maxFechaPorFactura.entries()].filter(
@@ -451,6 +496,7 @@ export async function GET(request: Request) {
           const clienteId = String(fac.cliente_id ?? "");
           const vid = clienteVendedor.get(clienteId) ?? null;
           const ultima = maxFechaPorFactura.get(fid) ?? null;
+          const saldoPendiente = saldoPendienteFactura(fac, net, sumPag);
 
           pushLine(
             {
@@ -463,6 +509,9 @@ export async function GET(request: Request) {
               fecha: ultima,
               monto_base: net,
               comision_estimada_linea: 0,
+              cobrado_periodo: roundMoney(sumPagosPeriodoPorFactura.get(fid) ?? 0),
+              saldo_pendiente: saldoPendiente,
+              pendiente_por_comisionar: 0,
             },
             Boolean(vid),
             "factura"
@@ -483,6 +532,10 @@ export async function GET(request: Request) {
     type Agg = {
       vendorId: string;
       revenue: number;
+      cobradoPeriodo: number;
+      saldoPendiente: number;
+      pendientePorComisionar: number;
+      facturasConPendiente: Set<string>;
       lines: LineaPreview[];
     };
     const porVendor = new Map<string, Agg>();
@@ -494,10 +547,25 @@ export async function GET(request: Request) {
       if (!vid) continue;
       let agg = porVendor.get(vid);
       if (!agg) {
-        agg = { vendorId: vid, revenue: 0, lines: [] };
+        agg = {
+          vendorId: vid,
+          revenue: 0,
+          cobradoPeriodo: 0,
+          saldoPendiente: 0,
+          pendientePorComisionar: 0,
+          facturasConPendiente: new Set(),
+          lines: [],
+        };
         porVendor.set(vid, agg);
       }
       agg.revenue += ln.monto_base;
+      agg.cobradoPeriodo += ln.cobrado_periodo;
+      const facturaKey = ln.factura_id ?? `linea-${agg.lines.length}`;
+      if (!agg.facturasConPendiente.has(facturaKey)) {
+        agg.facturasConPendiente.add(facturaKey);
+        agg.saldoPendiente += ln.saldo_pendiente;
+        agg.pendientePorComisionar += ln.pendiente_por_comisionar;
+      }
       agg.lines.push({ ...ln });
     }
 
@@ -507,9 +575,15 @@ export async function GET(request: Request) {
     const porVendedorOut: Record<string, unknown>[] = [];
     let revenueTotal = 0;
     let comisionTotal = 0;
+    let cobradoTotal = 0;
+    let pendienteCobroTotal = 0;
+    let pendienteComisionarTotal = 0;
 
     for (const [, agg] of porVendor) {
       revenueTotal += agg.revenue;
+      cobradoTotal += agg.cobradoPeriodo;
+      pendienteCobroTotal += agg.saldoPendiente;
+      pendienteComisionarTotal += agg.pendientePorComisionar;
       const tier: TierResult | null = sinEscalas ? null : resolverTramo(agg.revenue, escalas);
       const comisionVen = sinEscalas ? 0 : comisionPorTramo(agg.revenue, tier);
       const progresoEscala = calcularProgresoEscala(agg.revenue, escalas);
@@ -527,6 +601,9 @@ export async function GET(request: Request) {
         vendedor_nombre: nombres.get(agg.vendorId) ?? agg.vendorId.slice(0, 8),
         cantidad_movimientos: agg.lines.length,
         revenue_base: Math.round(agg.revenue * 100) / 100,
+        cobrado_periodo_total: roundMoney(agg.cobradoPeriodo),
+        saldo_pendiente_total: roundMoney(agg.saldoPendiente),
+        pendiente_por_comisionar_total: roundMoney(agg.pendientePorComisionar),
         escala_aplicada: tier?.etiqueta ?? (sinEscalas ? "Sin escalas configuradas" : "—"),
         porcentaje_tramo: tier?.porcentaje ?? 0,
         premio_fijo_tramo: tier?.premioFijo ?? 0,
@@ -545,6 +622,9 @@ export async function GET(request: Request) {
     const kpis = {
       revenue_base_total: Math.round(revenueTotal * 100) / 100,
       comision_estimada_total: Math.round(comisionTotal * 100) / 100,
+      cobrado_periodo_total: roundMoney(cobradoTotal),
+      saldo_pendiente_total: roundMoney(pendienteCobroTotal),
+      pendiente_por_comisionar_total: roundMoney(pendienteComisionarTotal),
       vendedores_con_comision: porVendedorOut.length,
       fuentes_sin_vendedor: fuentesSinVendedorKpi,
       alertas_sin_vendedor_pagos: soloVendedor ? 0 : alertasSinVendedorPagos,

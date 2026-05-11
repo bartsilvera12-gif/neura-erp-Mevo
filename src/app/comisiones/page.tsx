@@ -27,6 +27,9 @@ type Linea = {
   fecha: string | null;
   monto_base: number;
   comision_estimada_linea: number;
+  cobrado_periodo: number;
+  saldo_pendiente: number;
+  pendiente_por_comisionar: number;
 };
 
 type VendedorRow = {
@@ -34,6 +37,9 @@ type VendedorRow = {
   vendedor_nombre: string;
   cantidad_movimientos: number;
   revenue_base: number;
+  cobrado_periodo_total: number;
+  saldo_pendiente_total: number;
+  pendiente_por_comisionar_total: number;
   escala_aplicada: string;
   porcentaje_tramo: number;
   premio_fijo_tramo: number;
@@ -70,6 +76,9 @@ type PreviewMeta = {
 type PreviewKpis = {
   revenue_base_total: number;
   comision_estimada_total: number;
+  cobrado_periodo_total: number;
+  saldo_pendiente_total: number;
+  pendiente_por_comisionar_total: number;
   vendedores_con_comision: number;
   fuentes_sin_vendedor: number;
   alertas_sin_vendedor_pagos: number;
@@ -119,7 +128,7 @@ function faltaEscalaLabel(r: VendedorRow): string {
   if (r.max_escala_alcanzada) return "Ya estás en el tramo más alto.";
   if (r.falta_para_siguiente_escala == null) return "Sin escala siguiente configurada.";
   if (r.falta_para_siguiente_escala <= 0) return "Ya alcanzaste la siguiente escala.";
-  return `Faltan ${fmtMoney(r.falta_para_siguiente_escala)} para la siguiente escala.`;
+  return `Te faltan ₲ ${fmtMoney(r.falta_para_siguiente_escala)} para llegar a la siguiente escala.`;
 }
 
 /** Texto claro para KPIs de movimientos sin vendedor (sin exponer nombres de columnas técnicas). */
@@ -163,10 +172,38 @@ function ScaleProgress({ row, compact = false }: { row: VendedorRow; compact?: b
   );
 }
 
+function MiniScaleSummary({ row }: { row: VendedorRow }) {
+  const progress = row.max_escala_alcanzada ? 100 : row.progreso_hacia_siguiente_pct ?? 0;
+  return (
+    <div className="min-w-[180px] text-left sm:text-right">
+      <p className="text-[10px] font-semibold uppercase text-slate-400">Progreso de escala</p>
+      <p className="text-xs font-semibold text-slate-700">{row.max_escala_alcanzada ? "Máxima escala alcanzada" : faltaEscalaLabel(row)}</p>
+      <div className="mt-1 h-1.5 rounded-full bg-slate-100">
+        <div
+          className="h-1.5 rounded-full bg-sky-500"
+          style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TotalsStrip({ row }: { row: VendedorRow }) {
+  return (
+    <div className="grid gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
+      <ConfigMetricCard label="Base comisionable" value={fmtMoney(row.revenue_base)} />
+      <ConfigMetricCard label="Comisión estimada" value={fmtMoney(row.comision_estimada)} />
+      <ConfigMetricCard label="Cobrado" value={fmtMoney(row.cobrado_periodo_total ?? 0)} />
+      <ConfigMetricCard label="Pendiente de cobro" value={fmtMoney(row.saldo_pendiente_total ?? 0)} />
+      <ConfigMetricCard label="Pendiente por comisionar" value={fmtMoney(row.pendiente_por_comisionar_total ?? 0)} />
+    </div>
+  );
+}
+
 function MovimientosTable({ row }: { row: VendedorRow }) {
   return (
     <div className="overflow-x-auto">
-      <table className="mt-3 w-full min-w-[560px] text-left text-sm">
+      <table className="mt-3 w-full min-w-[980px] text-left text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
             <th className="py-2 pr-2">Cliente</th>
@@ -174,7 +211,10 @@ function MovimientosTable({ row }: { row: VendedorRow }) {
             <th className="py-2 pr-2">Comprobante</th>
             <th className="py-2 pr-2">Fecha</th>
             <th className="py-2 pr-2 text-right">Base comisionable</th>
-            <th className="py-2 text-right">Comisión estimada</th>
+            <th className="py-2 pr-2 text-right">Comisión estimada</th>
+            <th className="py-2 pr-2 text-right">Cobrado</th>
+            <th className="py-2 pr-2 text-right">Pendiente</th>
+            <th className="py-2 text-right">Pendiente por comisionar</th>
           </tr>
         </thead>
         <tbody>
@@ -185,9 +225,12 @@ function MovimientosTable({ row }: { row: VendedorRow }) {
               <td className="py-2 pr-2 text-xs text-slate-700">{ln.numero_factura ?? "—"}</td>
               <td className="py-2 pr-2 text-xs text-slate-600">{formatDate(ln.fecha)}</td>
               <td className="py-2 pr-2 text-right tabular-nums">{fmtMoney(ln.monto_base)}</td>
-              <td className="py-2 text-right tabular-nums text-emerald-800">
+              <td className="py-2 pr-2 text-right tabular-nums text-emerald-800">
                 {fmtMoney(ln.comision_estimada_linea)}
               </td>
+              <td className="py-2 pr-2 text-right tabular-nums">{fmtMoney(ln.cobrado_periodo ?? 0)}</td>
+              <td className="py-2 pr-2 text-right tabular-nums">{fmtMoney(ln.saldo_pendiente ?? 0)}</td>
+              <td className="py-2 text-right tabular-nums">{fmtMoney(ln.pendiente_por_comisionar ?? 0)}</td>
             </tr>
           ))}
         </tbody>
@@ -334,22 +377,43 @@ export default function ComisionesPage() {
             </div>
           ) : (
             <>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <ConfigMetricCard label="Base comisionable" value={fmtMoney(sellerRow.revenue_base)} />
-                <ConfigMetricCard label="Comisión estimada" value={fmtMoney(sellerRow.comision_estimada)} />
-                <ConfigMetricCard label="Escala actual" value={fmtPct(sellerRow.escala_actual_porcentaje)} />
-                <ConfigMetricCard label="Movimientos" value={sellerRow.cantidad_movimientos} />
+              <div className="rounded-2xl border border-sky-100 bg-gradient-to-br from-white to-sky-50 p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-sky-700">Mi comisión del mes</p>
+                    <h2 className="mt-1 text-xl font-bold text-slate-900">{sellerRow.vendedor_nombre}</h2>
+                    <p className="mt-1 text-sm text-slate-600">{siguienteEscalaLabel(sellerRow)}</p>
+                  </div>
+                  <span className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-semibold text-sky-900">
+                    {sellerRow.max_escala_alcanzada ? "Máxima escala alcanzada" : "En progreso"}
+                  </span>
+                </div>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                  <ConfigMetricCard label="Base comisionable" value={fmtMoney(sellerRow.revenue_base)} />
+                  <ConfigMetricCard label="Comisión estimada" value={fmtMoney(sellerRow.comision_estimada)} />
+                  <ConfigMetricCard label="Escala actual" value={fmtPct(sellerRow.escala_actual_porcentaje)} />
+                  <ConfigMetricCard label="Cobrado" value={fmtMoney(sellerRow.cobrado_periodo_total ?? 0)} />
+                  <ConfigMetricCard label="Pendiente de cobro" value={fmtMoney(sellerRow.saldo_pendiente_total ?? 0)} />
+                  <ConfigMetricCard label="Pendiente por comisionar" value={fmtMoney(sellerRow.pendiente_por_comisionar_total ?? 0)} />
+                </div>
+                <div className="mt-4">
+                  <ScaleProgress row={sellerRow} />
+                </div>
               </div>
-              <ScaleProgress row={sellerRow} />
               <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm open:shadow-md">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-4 pr-3 [&::-webkit-details-marker]:hidden">
                   <div>
                     <p className="font-semibold text-slate-900">Mis clientes y movimientos</p>
-                    <p className="text-xs text-slate-500">{sellerRow.cantidad_movimientos} movimientos en el período</p>
+                    <p className="text-xs text-slate-500">
+                      {sellerRow.cantidad_movimientos} movimientos · Pendiente de cobro ₲ {fmtMoney(sellerRow.saldo_pendiente_total ?? 0)}
+                    </p>
                   </div>
                   <ChevronDown className="h-5 w-5 shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
                 </summary>
                 <div className="border-t border-slate-100 px-4 pb-4">
+                  <div className="mt-4">
+                    <TotalsStrip row={sellerRow} />
+                  </div>
                   <MovimientosTable row={sellerRow} />
                 </div>
               </details>
@@ -359,9 +423,17 @@ export default function ComisionesPage() {
       ) : kpis && (
         <section>
           <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-500">Resumen</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <ConfigMetricCard label="Base comisionable total" value={fmtMoney(kpis.revenue_base_total)} />
             <ConfigMetricCard label="Comisión estimada total" value={fmtMoney(kpis.comision_estimada_total)} />
+            <ConfigMetricCard label="Total cobrado" value={fmtMoney(kpis.cobrado_periodo_total ?? 0)} />
+            <ConfigMetricCard label="Total pendiente de cobro" value={fmtMoney(kpis.saldo_pendiente_total ?? 0)} />
+            <ConfigMetricCard
+              label="Pendiente por comisionar"
+              value={fmtMoney(kpis.pendiente_por_comisionar_total ?? 0)}
+            />
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <ConfigMetricCard label="Vendedores con comisión" value={kpis.vendedores_con_comision} />
             <ConfigMetricCard
               label="Movimientos sin vendedor"
@@ -403,7 +475,7 @@ export default function ComisionesPage() {
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-900">{r.vendedor_nombre}</p>
                     <p className="text-xs text-slate-500">
-                      {r.cantidad_movimientos} movimientos · {escalaActualLabel(r)}
+                      {r.cantidad_movimientos} movimientos · {escalaActualLabel(r)} · {r.max_escala_alcanzada ? "Máxima escala" : faltaEscalaLabel(r)}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-4 text-right">
@@ -415,14 +487,19 @@ export default function ComisionesPage() {
                       <p className="text-[10px] font-semibold uppercase text-slate-400">Comisión estimada</p>
                       <p className="text-sm font-bold tabular-nums text-emerald-800">{fmtMoney(r.comision_estimada)}</p>
                     </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase text-slate-400">Pendiente</p>
+                      <p className="text-sm font-bold tabular-nums text-slate-800">{fmtMoney(r.saldo_pendiente_total ?? 0)}</p>
+                    </div>
+                    <MiniScaleSummary row={r} />
                     <ChevronDown className="h-5 w-5 shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
                   </div>
                 </summary>
                 <div className="border-t border-slate-100 px-4 pb-4">
-                  <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
-                    <MovimientosTable row={r} />
-                    <ScaleProgress row={r} compact />
+                  <div className="mt-4">
+                    <TotalsStrip row={r} />
                   </div>
+                  <MovimientosTable row={r} />
                 </div>
               </details>
             ))}
