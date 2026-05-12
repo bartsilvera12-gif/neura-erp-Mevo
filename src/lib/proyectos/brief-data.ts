@@ -7,6 +7,19 @@ export type BriefFieldDef =
   | { kind: "checkbox"; key: string; label: string }
   | { kind: "text"; key: string; label: string; placeholder?: string };
 
+export type ProyectoModuloSnapshot = {
+  id: string | null;
+  slug: string | null;
+  nombre: string;
+};
+
+export type ProyectoSaasBriefForm = {
+  empresa_nombre: string;
+  whatsapp_contacto: string;
+  observaciones: string;
+  modulos_necesarios: ProyectoModuloSnapshot[];
+};
+
 /** Campos editables en la pestaña "Datos" (proyecto web y compat. con JSON previo). */
 export const PROYECTO_DATOS_BRIEF_FIELDS: BriefFieldDef[] = [
   { kind: "text", key: "marca", label: "Nombre de la marca" },
@@ -22,6 +35,13 @@ export const PROYECTO_DATOS_BRIEF_FIELDS: BriefFieldDef[] = [
   { kind: "checkbox", key: "hosting_existente", label: "Hosting existente" },
   { kind: "text", key: "referencias_urls", label: "Referencias de páginas" },
 ];
+
+export const PROYECTO_SAAS_BRIEF_KEYS = {
+  empresaNombre: "saas_empresa_nombre",
+  whatsappContacto: "saas_whatsapp_contacto",
+  observaciones: "saas_observaciones",
+  modulosNecesarios: "saas_modulos_necesarios",
+} as const;
 
 /** Claves que pueden existir con nombres antiguos; al leer se unifican. */
 const BRIEF_ALIASES: Record<string, string> = {
@@ -47,6 +67,45 @@ export function coalesceBriefData(raw: unknown): Record<string, string> {
     else out[k] = String(v);
   }
   return out;
+}
+
+function readRawBriefObject(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
+function normalizeModuloSnapshot(value: unknown): ProyectoModuloSnapshot | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  const nombre = typeof r.nombre === "string" ? r.nombre.trim() : "";
+  if (!nombre) return null;
+  return {
+    id: typeof r.id === "string" && r.id.trim() ? r.id.trim() : null,
+    slug: typeof r.slug === "string" && r.slug.trim() ? r.slug.trim() : null,
+    nombre,
+  };
+}
+
+export function readSaasBriefData(raw: unknown): ProyectoSaasBriefForm {
+  const brief = readRawBriefObject(raw);
+  const modulosRaw = brief[PROYECTO_SAAS_BRIEF_KEYS.modulosNecesarios];
+  const modulos = Array.isArray(modulosRaw)
+    ? modulosRaw.map(normalizeModuloSnapshot).filter((m): m is ProyectoModuloSnapshot => m != null)
+    : [];
+  return {
+    empresa_nombre:
+      typeof brief[PROYECTO_SAAS_BRIEF_KEYS.empresaNombre] === "string"
+        ? String(brief[PROYECTO_SAAS_BRIEF_KEYS.empresaNombre])
+        : "",
+    whatsapp_contacto:
+      typeof brief[PROYECTO_SAAS_BRIEF_KEYS.whatsappContacto] === "string"
+        ? String(brief[PROYECTO_SAAS_BRIEF_KEYS.whatsappContacto])
+        : "",
+    observaciones:
+      typeof brief[PROYECTO_SAAS_BRIEF_KEYS.observaciones] === "string"
+        ? String(brief[PROYECTO_SAAS_BRIEF_KEYS.observaciones])
+        : "",
+    modulos_necesarios: modulos,
+  };
 }
 
 /** Merge superficial: nuevas claves pisan las existentes; no elimina claves no enviadas. */
@@ -146,4 +205,29 @@ export function applyBriefFormToExisting(
     }
   }
   return base;
+}
+
+export function applySaasFormToExisting(
+  existingRaw: unknown,
+  form: ProyectoSaasBriefForm
+): Record<string, unknown> {
+  const base = readRawBriefObject(existingRaw);
+  const next = { ...base };
+  const empresa = form.empresa_nombre.trim();
+  const whatsapp = form.whatsapp_contacto.trim();
+  const observaciones = form.observaciones.trim();
+  const modulos = form.modulos_necesarios
+    .map(normalizeModuloSnapshot)
+    .filter((m): m is ProyectoModuloSnapshot => m != null);
+
+  if (empresa) next[PROYECTO_SAAS_BRIEF_KEYS.empresaNombre] = empresa;
+  else delete next[PROYECTO_SAAS_BRIEF_KEYS.empresaNombre];
+  if (whatsapp) next[PROYECTO_SAAS_BRIEF_KEYS.whatsappContacto] = whatsapp;
+  else delete next[PROYECTO_SAAS_BRIEF_KEYS.whatsappContacto];
+  if (observaciones) next[PROYECTO_SAAS_BRIEF_KEYS.observaciones] = observaciones;
+  else delete next[PROYECTO_SAAS_BRIEF_KEYS.observaciones];
+  if (modulos.length > 0) next[PROYECTO_SAAS_BRIEF_KEYS.modulosNecesarios] = modulos;
+  else delete next[PROYECTO_SAAS_BRIEF_KEYS.modulosNecesarios];
+
+  return next;
 }

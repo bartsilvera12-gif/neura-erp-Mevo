@@ -16,6 +16,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { readSaasBriefData } from "@/lib/proyectos/brief-data";
 import ProyectoDetalleModal from "./components/ProyectoDetalleModal";
 
 type EstadoRow = {
@@ -38,6 +39,7 @@ type ProyectoCard = Record<string, unknown> & {
   last_activity_at?: string;
   fecha_ingreso?: string;
   fecha_prometida?: string | null;
+  brief_data?: Record<string, unknown> | null;
   bloqueado?: boolean;
   archivado?: boolean;
   proyecto_tipo?: { nombre?: string; codigo?: string } | null;
@@ -175,6 +177,13 @@ function slaEstadoLabel(p: ProyectoCard): string {
   const elapsed = formatSlaDuration(p.tiempo_en_estado_segundos);
   const target = formatSlaTarget(sla.objetivo_horas);
   return target ? `SLA: ${elapsed} / ${target}` : `SLA: ${elapsed}`;
+}
+
+function saasModuleCountLabel(p: ProyectoCard): string | null {
+  if (p.proyecto_tipo?.codigo !== "saas") return null;
+  const count = readSaasBriefData(p.brief_data).modulos_necesarios.length;
+  if (count <= 0) return null;
+  return count === 1 ? "1 módulo" : `${count} módulos`;
 }
 
 export default function ProyectosKanbanClient() {
@@ -594,6 +603,7 @@ function ProjectCardView({
     (p.cliente?.empresa || "").trim() ||
     (p.cliente?.nombre_contacto || "").trim() ||
     "Sin cliente";
+  const saasModulesLabel = saasModuleCountLabel(p);
 
   const style: CSSProperties | undefined = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
@@ -644,6 +654,11 @@ function ProjectCardView({
           <span className="rounded border px-1.5 py-0.5 text-[10px] font-medium" style={softBadgeStyle}>
             {p.proyecto_tipo?.nombre ?? "Tipo"}
           </span>
+          {saasModulesLabel ? (
+            <span className="rounded border px-1.5 py-0.5 text-[10px] font-medium" style={softBadgeStyle}>
+              {saasModulesLabel}
+            </span>
+          ) : null}
           <span
             className="rounded border px-1.5 py-0.5 text-[10px] font-semibold"
             style={softBadgeStyle}

@@ -7,8 +7,12 @@ import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session"
 import {
   PROYECTO_DATOS_BRIEF_FIELDS,
   applyBriefFormToExisting,
+  applySaasFormToExisting,
   coalesceBriefData,
   formatFechaPyFull,
+  readSaasBriefData,
+  type ProyectoModuloSnapshot,
+  type ProyectoSaasBriefForm,
 } from "@/lib/proyectos/brief-data";
 
 export type DetalleResp = {
@@ -29,6 +33,7 @@ export type DetalleResp = {
 };
 
 type UsuarioActivo = { id: string; nombre?: string | null; email?: string | null };
+type ModuloCatalogo = { id: string; nombre: string; slug: string };
 
 const TAB_IDS = ["resumen", "datos", "tareas", "comentarios", "archivos", "historial"] as const;
 export type TabId = (typeof TAB_IDS)[number];
@@ -98,6 +103,7 @@ export default function ProyectoDetalleInner({
   const [data, setData] = useState<DetalleResp | null>(null);
   const [estados, setEstados] = useState<{ id: string; nombre: string }[]>([]);
   const [usuarios, setUsuarios] = useState<UsuarioActivo[]>([]);
+  const [modulosCatalogo, setModulosCatalogo] = useState<ModuloCatalogo[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -105,6 +111,12 @@ export default function ProyectoDetalleInner({
   const [tareaTitulo, setTareaTitulo] = useState("");
 
   const [briefForm, setBriefForm] = useState<Record<string, string>>({});
+  const [saasForm, setSaasForm] = useState<ProyectoSaasBriefForm>({
+    empresa_nombre: "",
+    whatsapp_contacto: "",
+    observaciones: "",
+    modulos_necesarios: [],
+  });
   const [responsableTecnicoId, setResponsableTecnicoId] = useState("");
   const [observaciones, setObservaciones] = useState("");
   const [datosSnapshot, setDatosSnapshot] = useState("");
@@ -123,11 +135,14 @@ export default function ProyectoDetalleInner({
     setData(j.data);
     const p = j.data.proyecto;
     const merged = coalesceBriefData(p.brief_data);
+    const saas = readSaasBriefData(p.brief_data);
     setBriefForm(merged);
+    setSaasForm(saas);
     setResponsableTecnicoId(typeof p.responsable_tecnico_id === "string" ? p.responsable_tecnico_id : "");
     setObservaciones(typeof p.observaciones_comerciales === "string" ? p.observaciones_comerciales : "");
     setDatosSnapshot(JSON.stringify({
       bf: merged,
+      saas,
       responsable_tecnico_id: typeof p.responsable_tecnico_id === "string" ? p.responsable_tecnico_id : "",
       obs: typeof p.observaciones_comerciales === "string" ? p.observaciones_comerciales : "",
     }));
@@ -149,14 +164,17 @@ export default function ProyectoDetalleInner({
   useEffect(() => {
     let c = false;
     (async () => {
-      const [r, rUsers] = await Promise.all([
+      const [r, rUsers, rModulos] = await Promise.all([
         fetchWithSupabaseSession("/api/proyectos/estados", { cache: "no-store" }),
         fetchWithSupabaseSession("/api/usuarios/empresa-activos", { cache: "no-store" }),
+        fetchWithSupabaseSession("/api/proyectos/modulos-catalogo", { cache: "no-store" }),
       ]);
       const j = (await r.json()) as { success?: boolean; data?: { id: string; nombre: string }[] };
       const jUsers = (await rUsers.json()) as { usuarios?: UsuarioActivo[] };
+      const jModulos = (await rModulos.json()) as { success?: boolean; data?: ModuloCatalogo[] };
       if (!c && j.success && j.data) setEstados(j.data);
       if (!c) setUsuarios(jUsers.usuarios ?? []);
+      if (!c && jModulos.success && jModulos.data) setModulosCatalogo(jModulos.data);
     })();
     return () => {
       c = true;
@@ -166,11 +184,12 @@ export default function ProyectoDetalleInner({
   const datosDirty = useMemo(() => {
     const cur = JSON.stringify({
       bf: briefForm,
+      saas: saasForm,
       responsable_tecnico_id: responsableTecnicoId,
       obs: observaciones,
     });
     return datosSnapshot !== "" && cur !== datosSnapshot;
-  }, [briefForm, responsableTecnicoId, observaciones, datosSnapshot]);
+  }, [briefForm, saasForm, responsableTecnicoId, observaciones, datosSnapshot]);
 
   useEffect(() => {
     onDirtyChange?.(datosDirty);
@@ -179,7 +198,11 @@ export default function ProyectoDetalleInner({
   async function guardarDatos() {
     const proyecto = data?.proyecto;
     if (!proyecto) return;
-    const briefMerged = applyBriefFormToExisting(proyecto.brief_data, briefForm);
+    const tipoCodigo = proyecto.proyecto_tipo?.codigo ?? "";
+    const briefMerged =
+      tipoCodigo === "saas"
+        ? applySaasFormToExisting(proyecto.brief_data, saasForm)
+        : applyBriefFormToExisting(proyecto.brief_data, briefForm);
     const res = await fetchWithSupabaseSession(`/api/proyectos/${projectId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -276,7 +299,21 @@ export default function ProyectoDetalleInner({
 
   const proyecto = data?.proyecto;
   const codigoTipo = proyecto?.proyecto_tipo?.codigo ?? "";
+  const esWeb = codigoTipo === "web";
+  const esSaas = codigoTipo === "saas";
   const briefCoerced = coalesceBriefData(proyecto?.brief_data);
+  const saasModuloIds = saasForm.modulos_necesarios
+    .map((modulo) => modulo.id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  const updateSaasField = <K extends keyof ProyectoSaasBriefForm>(key: K, value: ProyectoSaasBriefForm[K]) => {
+    setSaasForm((prev) => ({ ...prev, [key]: value }));
+  };
+  const updateSaasModulos = (ids: string[]) => {
+    const snapshots: ProyectoModuloSnapshot[] = modulosCatalogo
+      .filter((modulo) => ids.includes(modulo.id))
+      .map((modulo) => ({ id: modulo.id, slug: modulo.slug, nombre: modulo.nombre }));
+    updateSaasField("modulos_necesarios", snapshots);
+  };
 
   if (!projectId) return null;
   if (loading && !data) {
@@ -400,24 +437,51 @@ export default function ProyectoDetalleInner({
                       : "—"}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-3 border-b border-slate-700/50 pb-2">
-                  <dt className={labelCls}>Nombre de la marca</dt>
-                  <dd className="max-w-[55%] text-right text-slate-100">
-                    {(briefCoerced.marca || "").trim() || "—"}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-3 border-b border-slate-700/50 pb-2">
-                  <dt className={labelCls}>Dominio a usar</dt>
-                  <dd className="max-w-[55%] break-all text-right text-slate-100">
-                    {(briefCoerced.dominio_usar || "").trim() || "—"}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-3 border-b border-slate-700/50 pb-2">
-                  <dt className={labelCls}>Tipo de web</dt>
-                  <dd className="max-w-[55%] text-right text-slate-100">
-                    {(briefCoerced.tipo_web || "").trim() || "—"}
-                  </dd>
-                </div>
+                {esSaas ? (
+                  <>
+                    <div className="flex justify-between gap-3 border-b border-slate-700/50 pb-2">
+                      <dt className={labelCls}>Empresa SaaS / ERP</dt>
+                      <dd className="max-w-[55%] text-right text-slate-100">
+                        {saasForm.empresa_nombre.trim() || "—"}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3 border-b border-slate-700/50 pb-2">
+                      <dt className={labelCls}>Módulos necesarios</dt>
+                      <dd className="max-w-[55%] text-right text-slate-100">
+                        {saasForm.modulos_necesarios.length > 0
+                          ? saasForm.modulos_necesarios.map((m) => m.nombre).join(", ")
+                          : "—"}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3 border-b border-slate-700/50 pb-2">
+                      <dt className={labelCls}>WhatsApp contacto</dt>
+                      <dd className="max-w-[55%] text-right text-slate-100">
+                        {saasForm.whatsapp_contacto.trim() || "—"}
+                      </dd>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between gap-3 border-b border-slate-700/50 pb-2">
+                      <dt className={labelCls}>Nombre de la marca</dt>
+                      <dd className="max-w-[55%] text-right text-slate-100">
+                        {(briefCoerced.marca || "").trim() || "—"}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3 border-b border-slate-700/50 pb-2">
+                      <dt className={labelCls}>Dominio a usar</dt>
+                      <dd className="max-w-[55%] break-all text-right text-slate-100">
+                        {(briefCoerced.dominio_usar || "").trim() || "—"}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3 border-b border-slate-700/50 pb-2">
+                      <dt className={labelCls}>Tipo de web</dt>
+                      <dd className="max-w-[55%] text-right text-slate-100">
+                        {(briefCoerced.tipo_web || "").trim() || "—"}
+                      </dd>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between gap-3">
                   <dt className={labelCls}>Prioridad</dt>
                   <dd className="text-right text-slate-100">{prioridadLabel(proyecto.prioridad)}</dd>
@@ -463,9 +527,14 @@ export default function ProyectoDetalleInner({
               </button>
             </div>
 
-            {codigoTipo === "web" ? (
+            {esWeb ? (
               <p className="text-xs text-slate-500">
                 Tipo &quot;Proyecto Web&quot;: campos adicionales del brief comercial.
+              </p>
+            ) : null}
+            {esSaas ? (
+              <p className="text-xs text-slate-500">
+                Tipo &quot;SaaS / ERP&quot;: snapshot de módulos requeridos, sin activar permisos ni módulos reales.
               </p>
             ) : null}
 
@@ -485,45 +554,98 @@ export default function ProyectoDetalleInner({
                   ))}
                 </select>
               </label>
-              <label className="block text-sm sm:col-span-2">
-                <span className={labelCls}>Observaciones comerciales</span>
-                <textarea
-                  className={`${inputCls} min-h-[88px]`}
-                  rows={3}
-                  value={observaciones}
-                  onChange={(e) => setObservaciones(e.target.value)}
-                  placeholder="Detalle adicional negociado con el cliente…"
-                />
-              </label>
+              {esWeb ? (
+                <label className="block text-sm sm:col-span-2">
+                  <span className={labelCls}>Observaciones comerciales</span>
+                  <textarea
+                    className={`${inputCls} min-h-[88px]`}
+                    rows={3}
+                    value={observaciones}
+                    onChange={(e) => setObservaciones(e.target.value)}
+                    placeholder="Detalle adicional negociado con el cliente…"
+                  />
+                </label>
+              ) : null}
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              {PROYECTO_DATOS_BRIEF_FIELDS.map((f) =>
-                f.kind === "checkbox" ? (
-                  <label key={f.key} className="flex items-center gap-2 text-sm text-slate-200">
-                    <input
-                      type="checkbox"
-                      className="rounded border-slate-600 bg-slate-900"
-                      checked={briefForm[f.key] === "1"}
-                      onChange={(e) =>
-                        setBriefForm((b) => ({ ...b, [f.key]: e.target.checked ? "1" : "" }))
-                      }
-                    />
-                    {f.label}
-                  </label>
-                ) : (
-                  <label key={f.key} className={`block text-sm ${f.key === "secciones" ? "sm:col-span-2" : ""}`}>
-                    <span className={labelCls}>{f.label}</span>
-                    <input
-                      className={inputCls}
-                      placeholder={f.placeholder}
-                      value={briefForm[f.key] ?? ""}
-                      onChange={(e) => setBriefForm((b) => ({ ...b, [f.key]: e.target.value }))}
-                    />
-                  </label>
-                )
-              )}
-            </div>
+            {esWeb ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {PROYECTO_DATOS_BRIEF_FIELDS.map((f) =>
+                  f.kind === "checkbox" ? (
+                    <label key={f.key} className="flex items-center gap-2 text-sm text-slate-200">
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-600 bg-slate-900"
+                        checked={briefForm[f.key] === "1"}
+                        onChange={(e) =>
+                          setBriefForm((b) => ({ ...b, [f.key]: e.target.checked ? "1" : "" }))
+                        }
+                      />
+                      {f.label}
+                    </label>
+                  ) : (
+                    <label key={f.key} className={`block text-sm ${f.key === "secciones" ? "sm:col-span-2" : ""}`}>
+                      <span className={labelCls}>{f.label}</span>
+                      <input
+                        className={inputCls}
+                        placeholder={f.placeholder}
+                        value={briefForm[f.key] ?? ""}
+                        onChange={(e) => setBriefForm((b) => ({ ...b, [f.key]: e.target.value }))}
+                      />
+                    </label>
+                  )
+                )}
+              </div>
+            ) : null}
+
+            {esSaas ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className={labelCls}>Nombre de la empresa</span>
+                  <input
+                    className={inputCls}
+                    value={saasForm.empresa_nombre}
+                    onChange={(e) => updateSaasField("empresa_nombre", e.target.value)}
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className={labelCls}>WhatsApp contacto</span>
+                  <input
+                    className={inputCls}
+                    placeholder="+595..."
+                    value={saasForm.whatsapp_contacto}
+                    onChange={(e) => updateSaasField("whatsapp_contacto", e.target.value)}
+                  />
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className={labelCls}>Módulos necesarios</span>
+                  <select
+                    multiple
+                    className={`${inputCls} h-44`}
+                    value={saasModuloIds}
+                    onChange={(e) =>
+                      updateSaasModulos(Array.from(e.currentTarget.selectedOptions).map((option) => option.value))
+                    }
+                  >
+                    {modulosCatalogo.map((modulo) => (
+                      <option key={modulo.id} value={modulo.id}>
+                        {modulo.nombre}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">Podés seleccionar varios módulos con Ctrl/Cmd o Shift.</p>
+                </label>
+                <label className="block text-sm sm:col-span-2">
+                  <span className={labelCls}>Observaciones</span>
+                  <textarea
+                    className={`${inputCls} min-h-[88px]`}
+                    rows={3}
+                    value={saasForm.observaciones}
+                    onChange={(e) => updateSaasField("observaciones", e.target.value)}
+                  />
+                </label>
+              </div>
+            ) : null}
 
             {Object.keys(briefCoerced).length === 0 &&
             !observaciones.trim() ? (

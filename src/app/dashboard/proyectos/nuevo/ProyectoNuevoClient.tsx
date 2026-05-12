@@ -5,12 +5,17 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { ClienteSearchSelect } from "@/app/dashboard/proyectos/components/ClienteSearchSelect";
-import { PROYECTO_DATOS_BRIEF_FIELDS } from "@/lib/proyectos/brief-data";
+import {
+  PROYECTO_DATOS_BRIEF_FIELDS,
+  applySaasFormToExisting,
+  type ProyectoModuloSnapshot,
+} from "@/lib/proyectos/brief-data";
 
 type Tipo = { id: string; nombre: string; codigo: string };
 type Estado = { id: string; nombre: string };
 type Cliente = { id: string; empresa?: string | null; nombre_contacto?: string | null };
 type Usuario = { id: string; nombre?: string | null };
+type ModuloCatalogo = { id: string; nombre: string; slug: string };
 
 export default function ProyectoNuevoClient() {
   const router = useRouter();
@@ -18,6 +23,7 @@ export default function ProyectoNuevoClient() {
   const [estados, setEstados] = useState<Estado[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [modulosCatalogo, setModulosCatalogo] = useState<ModuloCatalogo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -33,23 +39,37 @@ export default function ProyectoNuevoClient() {
   const [fechaIngreso, setFechaIngreso] = useState(() => new Date().toISOString().slice(0, 10));
   const [fechaProm, setFechaProm] = useState("");
   const [brief, setBrief] = useState<Record<string, string>>({});
+  const [saasEmpresaNombre, setSaasEmpresaNombre] = useState("");
+  const [saasWhatsapp, setSaasWhatsapp] = useState("");
+  const [saasObservaciones, setSaasObservaciones] = useState("");
+  const [saasModuloIds, setSaasModuloIds] = useState<string[]>([]);
 
   const tipoCodigo = useMemo(() => tipos.find((t) => t.id === tipoId)?.codigo ?? "", [tipos, tipoId]);
   const esWeb = tipoCodigo === "web";
+  const esSaas = tipoCodigo === "saas";
+  const saasModulosSeleccionados = useMemo<ProyectoModuloSnapshot[]>(
+    () =>
+      modulosCatalogo
+        .filter((modulo) => saasModuloIds.includes(modulo.id))
+        .map((modulo) => ({ id: modulo.id, slug: modulo.slug, nombre: modulo.nombre })),
+    [modulosCatalogo, saasModuloIds]
+  );
 
   useEffect(() => {
     let cancel = false;
     (async () => {
-      const [rT, rE, rC, rU] = await Promise.all([
+      const [rT, rE, rC, rU, rM] = await Promise.all([
         fetchWithSupabaseSession("/api/proyectos/tipos", { cache: "no-store" }),
         fetchWithSupabaseSession("/api/proyectos/estados", { cache: "no-store" }),
         fetchWithSupabaseSession("/api/clientes", { cache: "no-store" }),
         fetchWithSupabaseSession("/api/usuarios/empresa-activos", { cache: "no-store" }),
+        fetchWithSupabaseSession("/api/proyectos/modulos-catalogo", { cache: "no-store" }),
       ]);
       const jT = (await rT.json()) as { success?: boolean; data?: Tipo[] };
       const jE = (await rE.json()) as { success?: boolean; data?: Estado[] };
       const jC = (await rC.json()) as { success?: boolean; data?: Cliente[] };
       const jUsers = (await rU.json()) as { usuarios?: Usuario[] };
+      const jModulos = (await rM.json()) as { success?: boolean; data?: ModuloCatalogo[] };
       if (cancel) return;
       if (jT.success && jT.data) {
         setTipos(jT.data);
@@ -59,6 +79,7 @@ export default function ProyectoNuevoClient() {
       if (jE.success && jE.data) setEstados(jE.data);
       if (jC.success && jC.data) setClientes(jC.data);
       setUsuarios(jUsers.usuarios ?? []);
+      if (jModulos.success && jModulos.data) setModulosCatalogo(jModulos.data);
       setLoading(false);
     })();
     return () => {
@@ -70,10 +91,19 @@ export default function ProyectoNuevoClient() {
     e.preventDefault();
     setSaving(true);
     setErr(null);
-    const brief_data =
-      esWeb
-        ? Object.fromEntries(
-            PROYECTO_DATOS_BRIEF_FIELDS.map(({ key }) => [key, brief[key] ?? ""]).filter(([, v]) => v !== "")
+    const brief_data = esWeb
+      ? Object.fromEntries(
+          PROYECTO_DATOS_BRIEF_FIELDS.map(({ key }) => [key, brief[key] ?? ""]).filter(([, v]) => v !== "")
+        )
+      : esSaas
+        ? applySaasFormToExisting(
+            {},
+            {
+              empresa_nombre: saasEmpresaNombre,
+              whatsapp_contacto: saasWhatsapp,
+              observaciones: saasObservaciones,
+              modulos_necesarios: saasModulosSeleccionados,
+            }
           )
         : {};
 
@@ -263,6 +293,58 @@ export default function ProyectoNuevoClient() {
                   </label>
                 )
               )}
+            </div>
+          </div>
+        ) : null}
+
+        {esSaas ? (
+          <div className="space-y-3 rounded-lg border border-emerald-100 bg-emerald-50/40 p-4">
+            <h2 className="text-sm font-semibold text-emerald-900">Datos del ERP / SaaS</h2>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm">
+                <span className="text-slate-700">Nombre de la empresa</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  value={saasEmpresaNombre}
+                  onChange={(e) => setSaasEmpresaNombre(e.target.value)}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-slate-700">WhatsApp contacto</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  placeholder="+595..."
+                  value={saasWhatsapp}
+                  onChange={(e) => setSaasWhatsapp(e.target.value)}
+                />
+              </label>
+              <label className="block text-sm sm:col-span-2">
+                <span className="text-slate-700">Módulos necesarios</span>
+                <select
+                  multiple
+                  className="mt-1 h-40 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  value={saasModuloIds}
+                  onChange={(e) =>
+                    setSaasModuloIds(Array.from(e.currentTarget.selectedOptions).map((option) => option.value))
+                  }
+                >
+                  {modulosCatalogo.map((modulo) => (
+                    <option key={modulo.id} value={modulo.id}>
+                      {modulo.nombre}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">Podés seleccionar varios módulos con Ctrl/Cmd o Shift.</p>
+              </label>
+              <label className="block text-sm sm:col-span-2">
+                <span className="text-slate-700">Observaciones</span>
+                <textarea
+                  className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  rows={3}
+                  value={saasObservaciones}
+                  onChange={(e) => setSaasObservaciones(e.target.value)}
+                />
+              </label>
             </div>
           </div>
         ) : null}
