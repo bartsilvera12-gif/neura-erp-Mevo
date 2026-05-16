@@ -15,6 +15,7 @@ import {
 } from "@/components/config/global-config-primitives";
 import { GlobalConfigSubpageShell } from "@/components/config/GlobalConfigSubpageShell";
 import { useGlobalConfigForm } from "@/lib/config/use-global-config-form";
+import FacturacionModoSection from "@/components/config/FacturacionModoSection";
 
 export default function ConfiguracionFacturacionPage() {
   const { config, form, handleChange, handleGuardar, success, ready } = useGlobalConfigForm();
@@ -100,6 +101,8 @@ export default function ConfiguracionFacturacionPage() {
       )}
 
       <div className="space-y-5">
+        <FacturacionModoSection />
+
         <ConfigFormCard>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 gap-3">

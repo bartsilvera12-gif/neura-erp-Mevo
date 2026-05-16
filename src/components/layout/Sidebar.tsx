@@ -148,7 +148,10 @@ const MENU_STRUCTURE: MenuItem[] = [
     label: "Configuración",
     href: "/configuracion",
     icon: Settings,
-    children: [{ label: "Equipos y supervisión", href: "/configuracion/omnicanal-equipos" }],
+    children: [
+      { label: "Facturación", href: "/configuracion/facturacion" },
+      { label: "Equipos y supervisión", href: "/configuracion/omnicanal-equipos" },
+    ],
   },
   { key: "planes", slug: "planes", label: "Planes", href: "/planes", icon: FileText },
   { key: "gestion-clientes", slug: "gestion-clientes", label: "Gestión Clientes", href: "/gestion-clientes", icon: Users },
