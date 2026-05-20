@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import type { MarketingOpsDashboard, MarketingOpsPieza } from "@/lib/marketing-ops/types";
@@ -17,6 +16,7 @@ import {
   prioridadBadgeClass,
   prioridadDotClass,
 } from "./marketingOpsUi";
+import MarketingOpsPiezaDetalleModal from "./MarketingOpsPiezaDetalleModal";
 
 type ClienteOption = { id: string; empresa?: string | null; nombre_contacto?: string | null; nombre?: string | null };
 type UsuarioOption = { id: string; nombre?: string | null; email?: string | null };
@@ -181,6 +181,7 @@ export default function MarketingOpsClient() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [draft, setDraft] = useState<PiezaDraft | null>(null);
+  const [detalleId, setDetalleId] = useState<string | null>(null);
 
   const [filters, setFilters] = useState({
     q: "",
@@ -543,12 +544,13 @@ export default function MarketingOpsClient() {
                         >
                           Editar
                         </button>
-                        <Link
-                          href={`/dashboard/marketing-ops/piezas/${p.id}`}
+                        <button
+                          type="button"
+                          onClick={() => setDetalleId(p.id)}
                           className="rounded-xl bg-[#4FAEB2] px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-[#4FAEB2]/25 transition-colors hover:bg-[#3F8E91]"
                         >
                           Detalle
-                        </Link>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -570,6 +572,16 @@ export default function MarketingOpsClient() {
           onSave={() => void saveDraft()}
         />
       ) : null}
+
+      <MarketingOpsPiezaDetalleModal
+        piezaId={detalleId}
+        open={detalleId != null}
+        onClose={() => {
+          setDetalleId(null);
+          // Refresca el listado por si cambió un estado/comentario desde el modal
+          void load();
+        }}
+      />
     </div>
   );
 }
