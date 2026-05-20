@@ -66,13 +66,28 @@ export function estadoBadgeClass(value: string): string {
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
   }
   if (["en_produccion", "enviado", "programado", "revision_interna"].includes(value)) {
-    return "border-sky-200 bg-sky-50 text-sky-700";
+    return "border-[#4FAEB2]/30 bg-[#4FAEB2]/10 text-[#3F8E91]";
   }
   if (["con_correcciones", "correccion_interna", "sin_respuesta"].includes(value)) {
-    return "border-orange-200 bg-orange-50 text-orange-700";
+    return "border-amber-200 bg-amber-50 text-amber-700";
   }
   if (value === "cancelado") return "border-slate-200 bg-slate-50 text-slate-600";
   return "border-slate-200 bg-white text-slate-600";
+}
+
+export function estadoBadgeDotClass(value: string): string {
+  if (["publicado", "aprobado", "listo_para_enviar"].includes(value)) return "bg-emerald-500";
+  if (["en_produccion", "enviado", "programado", "revision_interna"].includes(value)) return "bg-[#4FAEB2]";
+  if (["con_correcciones", "correccion_interna", "sin_respuesta"].includes(value)) return "bg-amber-500";
+  if (value === "cancelado") return "bg-slate-400";
+  return "bg-slate-400";
+}
+
+export function prioridadDotClass(value: string): string {
+  if (value === "baja") return "bg-emerald-500";
+  if (value === "alta") return "bg-rose-500";
+  if (value === "urgente") return "bg-rose-600";
+  return "bg-amber-500";
 }
 
 export function clienteLabel(cliente?: { empresa?: string | null; nombre_contacto?: string | null; nombre?: string | null } | null): string {
