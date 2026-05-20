@@ -6,13 +6,13 @@
   --foreground: #0F172A;
   --foreground-muted: #475569;
   --card: #FFFFFF;
-  /* ZENTRA — identidad lateral (azul profundo; logo oficial en blanco) */
-  --zentra-sidebar: #0a2540;
-  --zentra-sidebar-elevated: #0c2d4d;
-  --zentra-sidebar-border: rgba(255, 255, 255, 0.06);
-  --zentra-sidebar-hover: rgba(79, 174, 178, 0.10);
-  --zentra-sidebar-active: rgba(79, 174, 178, 0.18);
-  --zentra-sidebar-accent: #4FAEB2;
+  /* ZENTRA — identidad lateral (turquesa profundo; logo oficial en blanco) */
+  --zentra-sidebar: #0B3A3D;
+  --zentra-sidebar-elevated: #104A4E;
+  --zentra-sidebar-border: rgba(255, 255, 255, 0.08);
+  --zentra-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --zentra-sidebar-active: rgba(125, 207, 210, 0.22);
+  --zentra-sidebar-accent: #7DCFD2;
   --zentra-login-bg-mid: #0b2f4c;
   --zentra-login-bg-deep: #051525;
   --sidebar: var(--zentra-sidebar);

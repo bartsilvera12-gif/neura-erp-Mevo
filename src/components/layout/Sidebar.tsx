@@ -225,14 +225,14 @@ function NavItem({
         <div
           className={`group/parent relative flex items-center gap-0.5 rounded-xl text-sm transition-all ${
             active
-              ? "bg-gradient-to-r from-[#4FAEB2]/18 via-[#4FAEB2]/10 to-transparent text-white"
+              ? "bg-gradient-to-r from-[#7DCFD2]/22 via-[#7DCFD2]/12 to-transparent text-white"
               : "text-slate-300 hover:bg-white/[0.04] hover:text-white"
           }`}
         >
           {active ? (
             <span
               aria-hidden="true"
-              className="absolute inset-y-1.5 left-0 w-[3px] rounded-r-full bg-[#4FAEB2] shadow-[0_0_10px_rgba(79,174,178,0.6)]"
+              className="absolute inset-y-1.5 left-0 w-[3px] rounded-r-full bg-[#7DCFD2] shadow-[0_0_12px_rgba(125,207,210,0.7)]"
             />
           ) : null}
           <Link
@@ -242,7 +242,7 @@ function NavItem({
           >
             <Icon
               className={`h-[18px] w-[18px] shrink-0 transition-colors ${
-                active ? "text-[#4FAEB2]" : "text-slate-400 group-hover/parent:text-slate-200"
+                active ? "text-[#7DCFD2]" : "text-slate-400 group-hover/parent:text-slate-200"
               }`}
             />
             {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
@@ -264,7 +264,7 @@ function NavItem({
               <button
                 type="button"
                 onClick={() => onToggleExpand()}
-                className="mr-1.5 shrink-0 rounded-md p-1 text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-[#4FAEB2]"
+                className="mr-1.5 shrink-0 rounded-md p-1 text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-[#7DCFD2]"
                 aria-expanded={expanded}
                 aria-label={expanded ? "Contraer submenú" : "Expandir submenú"}
               >
@@ -291,14 +291,14 @@ function NavItem({
                       href={c.href}
                       className={`relative block rounded-lg px-3 py-1.5 text-[13px] transition-all ${
                         childActive2
-                          ? "bg-[#4FAEB2]/12 font-medium text-white"
+                          ? "bg-[#7DCFD2]/14 font-medium text-white"
                           : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200"
                       }`}
                     >
                       {childActive2 ? (
                         <span
                           aria-hidden="true"
-                          className="absolute -left-[13px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-[#4FAEB2] shadow-[0_0_8px_rgba(79,174,178,0.7)]"
+                          className="absolute -left-[13px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-[#7DCFD2] shadow-[0_0_10px_rgba(125,207,210,0.8)]"
                         />
                       ) : null}
                       {c.label}
@@ -318,7 +318,7 @@ function NavItem({
       href={item.href}
       className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all ${
         isActive
-          ? "bg-gradient-to-r from-[#4FAEB2]/18 via-[#4FAEB2]/10 to-transparent font-semibold text-white"
+          ? "bg-gradient-to-r from-[#7DCFD2]/22 via-[#7DCFD2]/12 to-transparent font-semibold text-white"
           : "font-medium text-slate-300 hover:bg-white/[0.04] hover:text-white"
       }`}
       title={item.label}
@@ -326,12 +326,12 @@ function NavItem({
       {isActive ? (
         <span
           aria-hidden="true"
-          className="absolute inset-y-1.5 left-0 w-[3px] rounded-r-full bg-[#4FAEB2] shadow-[0_0_10px_rgba(79,174,178,0.6)]"
+          className="absolute inset-y-1.5 left-0 w-[3px] rounded-r-full bg-[#7DCFD2] shadow-[0_0_12px_rgba(125,207,210,0.7)]"
         />
       ) : null}
       <Icon
         className={`h-[18px] w-[18px] shrink-0 transition-colors ${
-          isActive ? "text-[#4FAEB2]" : "text-slate-400 group-hover:text-slate-200"
+          isActive ? "text-[#7DCFD2]" : "text-slate-400 group-hover:text-slate-200"
         }`}
       />
       {!collapsed && (
@@ -569,7 +569,7 @@ export default function Sidebar() {
           </label>
           <div className="group relative">
             <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#4FAEB2]"
+              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#7DCFD2]"
               aria-hidden
             />
             <input
@@ -579,14 +579,14 @@ export default function Sidebar() {
               placeholder="Buscar en el menú…"
               value={menuSearchQuery}
               onChange={(e) => setMenuSearchQuery(e.target.value)}
-              className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] py-2 pl-9 pr-3 text-xs text-white outline-none transition-[border-color,background-color,box-shadow] placeholder:text-slate-500 hover:border-white/[0.14] hover:bg-white/[0.06] focus:border-[#4FAEB2]/45 focus:bg-white/[0.06] focus:ring-2 focus:ring-[#4FAEB2]/25"
+              className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] py-2 pl-9 pr-3 text-xs text-white outline-none transition-[border-color,background-color,box-shadow] placeholder:text-slate-500 hover:border-white/[0.14] hover:bg-white/[0.06] focus:border-[#7DCFD2]/50 focus:bg-white/[0.06] focus:ring-2 focus:ring-[#7DCFD2]/30"
             />
           </div>
         </div>
       )}
 
       <nav
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-2.5 py-3 [scrollbar-width:thin] [scrollbar-color:rgba(79,174,178,0.25)_transparent]"
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-2.5 py-3 [scrollbar-width:thin] [scrollbar-color:rgba(125,207,210,0.30)_transparent]"
       >
         {showMenuNoResults ? (
           <p className="px-2 py-6 text-center text-xs text-slate-400">Sin resultados</p>
@@ -596,7 +596,7 @@ export default function Sidebar() {
         {favoritosItemsFiltered.length > 0 && !collapsed && (
           <div className="mb-5">
             <div className="mb-2 flex items-center gap-2 px-3">
-              <Star className="h-3 w-3 fill-current text-[#4FAEB2]" />
+              <Star className="h-3 w-3 fill-current text-[#7DCFD2]" />
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Favoritos
               </p>
@@ -625,7 +625,7 @@ export default function Sidebar() {
         <div className="space-y-0.5">
           {!collapsed && mainItemsFiltered.length > 0 && (
             <div className="mb-2 flex items-center gap-2 px-3">
-              <span className="h-1 w-1 rounded-full bg-[#4FAEB2]" />
+              <span className="h-1 w-1 rounded-full bg-[#7DCFD2]" />
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 General
               </p>
