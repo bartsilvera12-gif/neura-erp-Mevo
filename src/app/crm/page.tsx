@@ -497,10 +497,18 @@ function ProspectoCard({
         </span>
       </div>
 
-      {/* Selector de etapa: siempre disponible para cambio rápido */}
+      {/* Selector de etapa: siempre disponible para cambio rápido.
+          draggable=false + handlers stopPropagation impiden que el HTML5 drag
+          de la card padre intercepte el click en las opciones del listbox. */}
       <div
         className="mt-2 rounded-xl border border-slate-100 bg-slate-50/70 px-2 py-1.5"
+        draggable={false}
+        onDragStart={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
         onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         <label className="mb-1 block text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-500">
@@ -798,8 +806,23 @@ export default function CrmPage() {
   }
 
   async function handleMoverEtapa(id: string, etapaCodigo: string) {
-    await moveProspecto(id, etapaCodigo);
-    recargar();
+    // Optimistic update: la carta se mueve al instante a la nueva etapa.
+    // Si el servidor falla, recargar() abajo restaura el estado real.
+    const previo = prospectos;
+    setProspectos((prev) =>
+      prev.map((p) =>
+        String(p.id) === String(id) ? { ...p, etapa: etapaCodigo } : p,
+      ),
+    );
+
+    try {
+      await moveProspecto(id, etapaCodigo);
+      recargar();
+    } catch (err) {
+      console.error("[crm-funnel] handleMoverEtapa:", err);
+      setProspectos(previo); // rollback inmediato
+      recargar(); // y resync con el servidor
+    }
   }
 
   /**
