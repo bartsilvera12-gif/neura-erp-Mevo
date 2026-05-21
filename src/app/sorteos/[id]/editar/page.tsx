@@ -481,7 +481,7 @@ export default function EditarSorteoPage() {
         </Link>
         <Link
           href={`/sorteos/${id}/revendedores`}
-          className="inline-flex items-center rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100"
+          className="inline-flex items-center rounded-lg border border-[#4FAEB2]/30 bg-[#4FAEB2]/8 px-3 py-2 text-sm font-medium text-[#3F8E91] hover:bg-sky-100"
         >
           Revendedores y enlaces de referido
         </Link>
@@ -865,7 +865,7 @@ export default function EditarSorteoPage() {
           <button
             type="submit"
             disabled={guardando}
-            className="bg-[#0EA5E9] hover:bg-[#0284C7] disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-sm font-medium"
+            className="bg-[#4FAEB2] hover:bg-[#3F8E91] disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-sm font-medium"
           >
             {guardando ? "Guardando…" : "Guardar"}
           </button>

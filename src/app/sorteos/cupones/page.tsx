@@ -96,55 +96,105 @@ export default async function SorteoCuponesPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-2 text-xs text-slate-500">
+        <Link href="/sorteos" className="font-medium text-slate-500 transition-colors hover:text-[#4FAEB2]">
+          Sorteos
+        </Link>
+        <span aria-hidden className="text-slate-300">/</span>
+        <span className="font-semibold text-slate-700">Cupones</span>
+      </nav>
+
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Cupones</h1>
-          <p className="text-gray-500 text-sm mt-1">Órdenes con números de cupón generados</p>
+          <div className="flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              className="inline-block h-2 w-2 shrink-0 rounded-full bg-[#4FAEB2] shadow-[0_0_0_3px_rgba(79,174,178,0.18)]"
+            />
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#4FAEB2]">
+              Sorteos · Cupones
+            </p>
+          </div>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Cupones</h1>
+          <p className="mt-1 text-sm text-slate-500">Órdenes con números de cupón generados</p>
         </div>
         <Suspense fallback={null}>
           <SorteosCuponesManualClient />
         </Suspense>
       </div>
 
-      <nav className="flex flex-wrap gap-2 text-sm border-b border-slate-200 pb-3">
-        <Link href="/sorteos" className="text-slate-600 hover:text-[#0EA5E9]">
+      {/* Tabs */}
+      <div className="flex w-full flex-wrap gap-1 rounded-2xl border border-[#4FAEB2]/45 bg-white p-1.5 shadow-sm sm:w-fit">
+        <Link
+          href="/sorteos"
+          className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+        >
           Sorteos
         </Link>
-        <Link href="/sorteos/entradas" className="text-slate-600 hover:text-[#0EA5E9]">
+        <Link
+          href="/sorteos/entradas"
+          className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+        >
           Entradas
         </Link>
-        <span className="font-semibold text-[#0EA5E9]">Cupones</span>
-      </nav>
-
-      <form method="get" className="flex flex-wrap gap-2 items-end bg-slate-50 border border-slate-200 rounded-lg p-4">
-        <label className="flex flex-col gap-1 text-xs text-slate-600">
-          Buscar
-          <input
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Nombre, doc, teléfono…"
-            className="border border-slate-300 rounded px-2 py-1.5 text-sm w-[220px]"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-slate-600">
-          Sorteo (UUID)
-          <input
-            name="sorteo_id"
-            defaultValue={sorteoId ?? ""}
-            placeholder="opcional"
-            className="border border-slate-300 rounded px-2 py-1.5 text-sm font-mono w-[260px]"
-          />
-        </label>
-        <SorteoCuponesEstadoPagoFilter />
-        <button
-          type="submit"
-          className="bg-[#0EA5E9] text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-sky-600"
+        <span className="rounded-xl bg-[#4FAEB2] px-4 py-2 text-sm font-semibold text-white shadow-md shadow-[#4FAEB2]/30">
+          Cupones
+        </span>
+        <Link
+          href="/sorteos/tickets"
+          className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
         >
-          Filtrar
-        </button>
-        <Link href="/sorteos/cupones" className="text-sm text-slate-600 underline py-2">
-          Limpiar
+          Tickets
         </Link>
+      </div>
+
+      {/* Filtros */}
+      <form
+        method="get"
+        className="rounded-2xl border border-[#4FAEB2]/45 bg-white p-5 shadow-sm"
+      >
+        <div className="flex items-center gap-2">
+          <span aria-hidden="true" className="block h-5 w-1 rounded-full bg-[#4FAEB2]" />
+          <h3 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+            <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-[#4FAEB2]" />
+            Filtros
+          </h3>
+        </div>
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Buscar</span>
+            <input
+              name="q"
+              defaultValue={q ?? ""}
+              placeholder="Nombre, doc, teléfono…"
+              className="w-[220px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Sorteo (UUID)</span>
+            <input
+              name="sorteo_id"
+              defaultValue={sorteoId ?? ""}
+              placeholder="opcional"
+              className="w-[260px] rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20"
+            />
+          </label>
+          <SorteoCuponesEstadoPagoFilter />
+          <button
+            type="submit"
+            className="rounded-xl bg-[#4FAEB2] px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-[#4FAEB2]/25 transition-colors hover:bg-[#3F8E91]"
+          >
+            Filtrar
+          </button>
+          <Link
+            href="/sorteos/cupones"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:bg-[#4FAEB2]/5 hover:text-[#3F8E91]"
+          >
+            Limpiar
+          </Link>
+        </div>
       </form>
 
       {transient_error ? (
@@ -163,11 +213,11 @@ export default async function SorteoCuponesPage({
         Mostrando página {pageOut} de {totalPages} · {total_count} órdenes con cupón · hasta {limit} por página
       </div>
 
-      <div className="flex flex-wrap gap-2 items-center text-sm">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         {pageOut > 1 ? (
           <Link
             href={`/sorteos/cupones${buildQuery(qsBase, { page: String(pageOut - 1) })}`}
-            className="px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-50"
+            className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:bg-[#4FAEB2]/5 hover:text-[#3F8E91]"
           >
             ← Anterior
           </Link>
@@ -175,36 +225,36 @@ export default async function SorteoCuponesPage({
         {pageOut < totalPages ? (
           <Link
             href={`/sorteos/cupones${buildQuery(qsBase, { page: String(pageOut + 1) })}`}
-            className="px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-50"
+            className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:bg-[#4FAEB2]/5 hover:text-[#3F8E91]"
           >
             Siguiente →
           </Link>
         ) : null}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+      <div className="overflow-hidden rounded-2xl border border-[#4FAEB2]/45 bg-white shadow-sm">
         {rows.length === 0 && !queryError ? (
           <div className="py-16 text-center text-gray-400 text-sm">No hay órdenes con cupones</div>
         ) : rows.length === 0 ? null : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1140px]">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Nº orden</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Sorteo</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Cliente</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Cédula</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Teléfono</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Cantidad</th>
-                  <th className="text-right text-sm font-semibold text-slate-600 px-5 py-3">Monto</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Cupones</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Impresión</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Pago</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Fecha</th>
-                  <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Chat</th>
+                <tr className="border-b border-slate-100 bg-slate-50/80">
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Nº orden</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Sorteo</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Cliente</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Cédula</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Teléfono</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Cantidad</th>
+                  <th className="px-5 py-3 text-right text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Monto</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Cupones</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Impresión</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Pago</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Fecha</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Chat</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200">
+              <tbody className="divide-y divide-slate-100">
                 {rows.map((r) => (
                   <tr key={r.entrada_id} className="hover:bg-slate-50/80">
                     <td className="px-5 py-3 text-sm font-mono font-semibold text-slate-800">{r.numero_orden}</td>
@@ -233,7 +283,7 @@ export default async function SorteoCuponesPage({
                       {r.chat_conversation_id ? (
                         <Link
                           href={`/dashboard/conversaciones?conversationId=${encodeURIComponent(r.chat_conversation_id)}`}
-                          className="text-[#0EA5E9] hover:underline"
+                          className="text-[#4FAEB2] hover:underline"
                         >
                           Abrir
                         </Link>

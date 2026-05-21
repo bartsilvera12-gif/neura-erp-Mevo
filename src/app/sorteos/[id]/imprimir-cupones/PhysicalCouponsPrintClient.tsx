@@ -543,7 +543,7 @@ export default function PhysicalCouponsPrintClient({
         </div>
 
         {modoEntrada && entradaContext ? (
-          <div className="no-print rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          <div className="no-print rounded-xl border border-[#4FAEB2]/30 bg-[#4FAEB2]/8 px-4 py-3 text-sm text-sky-950">
             <p className="font-semibold">
               Imprimiendo cupones de la orden N°{" "}
               <span className="tabular-nums">{entradaContext.numero_orden}</span>
@@ -637,7 +637,7 @@ export default function PhysicalCouponsPrintClient({
           <div className="no-print flex flex-wrap gap-2">
             <Link
               href={`/sorteos/${encodeURIComponent(sorteoId)}/imprimir-cupones`}
-              className="text-sm font-medium text-[#0EA5E9] hover:underline"
+              className="text-sm font-medium text-[#4FAEB2] hover:underline"
             >
               Ver todos los cupones del sorteo (sin filtrar por orden)
             </Link>
@@ -666,7 +666,7 @@ export default function PhysicalCouponsPrintClient({
             type="button"
             onClick={handlePrint}
             disabled={rows.length === 0}
-            className="rounded-lg bg-[#0EA5E9] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0284C7] disabled:opacity-50 disabled:pointer-events-none"
+            className="rounded-lg bg-[#4FAEB2] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#3F8E91] disabled:opacity-50 disabled:pointer-events-none"
           >
             Imprimir cupones
           </button>
