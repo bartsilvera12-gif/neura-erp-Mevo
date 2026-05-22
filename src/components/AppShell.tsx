@@ -17,9 +17,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div id="neura-app-shell" className="flex h-svh min-h-0 overflow-hidden bg-[#F8FAFC]">
       <Sidebar />
-      <div id="neura-main-column" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div id="neura-main-column" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-y-contain">
         <Header />
-        <main id="neura-main-content" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain p-6">
+        <main id="neura-main-content" className="flex-1 p-6">
           {children}
         </main>
       </div>
