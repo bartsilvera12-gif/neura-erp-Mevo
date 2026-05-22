@@ -55,7 +55,7 @@ export default function UsuarioDetalleModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="usuario-detalle-titulo"
-        className="relative flex h-[92vh] max-h-[1000px] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-[#4FAEB2]/10 ring-1 ring-[#4FAEB2]/15"
+        className="relative flex h-[94vh] max-h-[1100px] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-[#4FAEB2]/10 ring-1 ring-[#4FAEB2]/15"
       >
         <span
           aria-hidden="true"
