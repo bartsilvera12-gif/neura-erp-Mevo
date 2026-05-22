@@ -113,6 +113,9 @@ export default function MonitoreoPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedPendingAgentId, setExpandedPendingAgentId] = useState<string | null>(null);
+  const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
+  const [pendingCollapsed, setPendingCollapsed] = useState(false);
+  const [agentsCollapsed, setAgentsCollapsed] = useState(false);
   const [uxRole, setUxRole] = useState<string | null>(null);
   const [uxTeamCount, setUxTeamCount] = useState<number | null>(null);
 
@@ -262,29 +265,61 @@ export default function MonitoreoPage() {
 
       {/* Chats sin asignar */}
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className={`flex flex-wrap items-start justify-between gap-3 ${unassignedCollapsed ? "" : "mb-4"}`}>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span aria-hidden="true" className="block h-5 w-1 rounded-full bg-[#4FAEB2]" />
               <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                 Chats sin asignar (recientes)
               </h2>
+              {dash && dash.unassigned_recent.length > 0 ? (
+                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-amber-700">
+                  {dash.unassigned_recent.length}
+                </span>
+              ) : null}
             </div>
-            <p className="mt-1.5 max-w-3xl pl-3 text-[11px] text-slate-500">
-              Motivo: cola manual, sin agentes en estado{" "}
-              <span className="font-medium text-slate-700">Disponible</span> para autoasignar, u otra espera en cola.
-            </p>
+            {!unassignedCollapsed ? (
+              <p className="mt-1.5 max-w-3xl pl-3 text-[11px] text-slate-500">
+                Motivo: cola manual, sin agentes en estado{" "}
+                <span className="font-medium text-slate-700">Disponible</span> para autoasignar, u otra espera en cola.
+              </p>
+            ) : null}
           </div>
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:text-[#3F8E91]"
-          >
-            <IconRefresh className="h-3.5 w-3.5" />
-            Actualizar
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={unassignedCollapsed}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:text-[#3F8E91] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200 disabled:hover:text-slate-700"
+            >
+              <IconRefresh className="h-3.5 w-3.5" />
+              Actualizar
+            </button>
+            <button
+              type="button"
+              onClick={() => setUnassignedCollapsed((v) => !v)}
+              aria-expanded={!unassignedCollapsed}
+              title={unassignedCollapsed ? "Mostrar listado" : "Ocultar listado"}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:text-[#3F8E91]"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`h-3.5 w-3.5 text-[#4FAEB2] transition-transform ${unassignedCollapsed ? "" : "rotate-180"}`}
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+              {unassignedCollapsed ? "Mostrar" : "Ocultar"}
+            </button>
+          </div>
         </div>
-        {loading || !dash ? (
+        {unassignedCollapsed ? null : loading || !dash ? (
           <div className="flex items-center gap-3 py-8 text-sm text-slate-500">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#4FAEB2]" />
             Cargando…
@@ -399,28 +434,60 @@ export default function MonitoreoPage() {
 
       {/* Pendientes 1ª respuesta */}
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className={`flex flex-wrap items-start justify-between gap-3 ${pendingCollapsed ? "" : "mb-4"}`}>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span aria-hidden="true" className="block h-5 w-1 rounded-full bg-[#4FAEB2]" />
               <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                 Chats sin primera respuesta humana
               </h2>
+              {dash && dash.pending_human_reply_groups.length > 0 ? (
+                <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-orange-700">
+                  {dash.pending_human_reply_groups.length}
+                </span>
+              ) : null}
             </div>
-            <p className="mt-1.5 max-w-3xl pl-3 text-[11px] text-slate-500">
-              Por agente: fila compacta con cantidad; desplegá para ver contacto, canal y tiempo de espera.
-            </p>
+            {!pendingCollapsed ? (
+              <p className="mt-1.5 max-w-3xl pl-3 text-[11px] text-slate-500">
+                Por agente: fila compacta con cantidad; desplegá para ver contacto, canal y tiempo de espera.
+              </p>
+            ) : null}
           </div>
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:text-[#3F8E91]"
-          >
-            <IconRefresh className="h-3.5 w-3.5" />
-            Actualizar
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={pendingCollapsed}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:text-[#3F8E91] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200 disabled:hover:text-slate-700"
+            >
+              <IconRefresh className="h-3.5 w-3.5" />
+              Actualizar
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingCollapsed((v) => !v)}
+              aria-expanded={!pendingCollapsed}
+              title={pendingCollapsed ? "Mostrar listado" : "Ocultar listado"}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:text-[#3F8E91]"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`h-3.5 w-3.5 text-[#4FAEB2] transition-transform ${pendingCollapsed ? "" : "rotate-180"}`}
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+              {pendingCollapsed ? "Mostrar" : "Ocultar"}
+            </button>
+          </div>
         </div>
-        {loading || !dash ? (
+        {pendingCollapsed ? null : loading || !dash ? (
           <div className="flex items-center gap-3 py-8 text-sm text-slate-500">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#4FAEB2]" />
             Cargando…
@@ -526,13 +593,42 @@ export default function MonitoreoPage() {
 
       {/* Agentes y carga */}
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <span aria-hidden="true" className="block h-5 w-1 rounded-full bg-[#4FAEB2]" />
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-            Agentes y carga
-          </h2>
+        <div className={`flex flex-wrap items-center justify-between gap-3 ${agentsCollapsed ? "" : "mb-4"}`}>
+          <div className="flex items-center gap-2">
+            <span aria-hidden="true" className="block h-5 w-1 rounded-full bg-[#4FAEB2]" />
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+              Agentes y carga
+            </h2>
+            {agents.length > 0 ? (
+              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-slate-700">
+                {agents.length}
+              </span>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => setAgentsCollapsed((v) => !v)}
+            aria-expanded={!agentsCollapsed}
+            title={agentsCollapsed ? "Mostrar listado" : "Ocultar listado"}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:text-[#3F8E91]"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`h-3.5 w-3.5 text-[#4FAEB2] transition-transform ${agentsCollapsed ? "" : "rotate-180"}`}
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+            {agentsCollapsed ? "Mostrar" : "Ocultar"}
+          </button>
         </div>
-        {loading ? (
+        {agentsCollapsed ? null : loading ? (
           <div className="flex items-center gap-3 py-8 text-sm text-slate-500">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#4FAEB2]" />
             Cargando…
