@@ -1095,7 +1095,9 @@ export default function ProyectoDetalleInner({
                     <span className="text-slate-300">·</span>
                     <span>{formatFechaPyFull(String(c.created_at ?? ""))}</span>
                   </div>
-                  <div className="mt-1.5 text-slate-700">{String(c.comentario ?? "")}</div>
+                  <div className="mt-1.5 whitespace-pre-line break-words text-sm leading-relaxed text-slate-700">
+                    {String(c.comentario ?? "")}
+                  </div>
                 </li>
               ))}
               {(data.comentarios ?? []).length === 0 ? (
