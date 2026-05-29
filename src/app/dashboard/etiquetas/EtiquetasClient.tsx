@@ -207,6 +207,13 @@ export default function EtiquetasClient() {
   const [campAudienceLoading, setCampAudienceLoading] = useState(false);
   const [campError, setCampError] = useState<string | null>(null);
   const [campSubmitting, setCampSubmitting] = useState(false);
+  const [campSuccess, setCampSuccess] = useState<{
+    campaign_id: string;
+    redirect_to: string;
+    total_recipients: number;
+    valid_recipients: number;
+    invalid_recipients: number;
+  } | null>(null);
 
   const filtersActiveCount = useMemo(() => {
     let n = 0;
@@ -368,6 +375,7 @@ export default function EtiquetasClient() {
     setCampCampaignName("");
     setCampAudience(null);
     setCampError(null);
+    setCampSuccess(null);
     setCampModalOpen(true);
   }, [tagCode]);
 
@@ -520,6 +528,8 @@ export default function EtiquetasClient() {
   );
 
   const submitCampaign = useCallback(async () => {
+    // ETQ-CAMP-FIX-3: guard contra doble-submit. Si ya hay success, no reintenta.
+    if (campSubmitting || campSuccess) return;
     setCampSubmitting(true);
     setCampError(null);
     try {
@@ -533,24 +543,74 @@ export default function EtiquetasClient() {
       };
       if (campCampaignName.trim()) body.campaign_name = campCampaignName.trim();
       if (selectedTemplateNeedsHeader) body.header_image_url = campHeaderImageUrl.trim();
-      const r = await fetch(`/api/chat/tags/create-campaign-from-tag`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        cache: "no-store",
-      });
-      const j = (await r.json()) as {
-        ok?: boolean;
-        data?: { campaign_id: string; redirect_to: string };
-        error?: string;
-      };
-      if (!r.ok || j.ok === false || !j.data?.campaign_id) {
-        setCampError(j.error || "No se pudo crear la campaña");
+
+      let r: Response;
+      try {
+        r = await fetch(`/api/chat/tags/create-campaign-from-tag`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          cache: "no-store",
+        });
+      } catch (netErr) {
+        setCampError(netErr instanceof Error ? `Error de red: ${netErr.message}` : "Error de red");
         return;
       }
-      // Redirigir a Campañas para revisar antes de enviar.
-      router.push(j.data.redirect_to);
+
+      let parsed: unknown;
+      try {
+        parsed = await r.json();
+      } catch {
+        setCampError(`Respuesta inválida del servidor (HTTP ${r.status}).`);
+        return;
+      }
+      const j = (parsed ?? {}) as {
+        ok?: boolean;
+        data?: {
+          campaign_id?: string;
+          redirect_to?: string;
+          total_recipients?: number;
+          valid_recipients?: number;
+          invalid_recipients?: number;
+        };
+        error?: string;
+      };
+
+      if (!r.ok || j.ok === false) {
+        setCampError(j.error || `No se pudo crear la campaña (HTTP ${r.status}).`);
+        return;
+      }
+
+      const campaignId = typeof j.data?.campaign_id === "string" ? j.data.campaign_id : "";
+      if (!campaignId) {
+        setCampError(
+          "La campaña pudo haberse creado pero el servidor no devolvió ID. Revisá en /dashboard/campanas."
+        );
+        return;
+      }
+      const redirectTo =
+        typeof j.data?.redirect_to === "string" && j.data.redirect_to
+          ? j.data.redirect_to
+          : `/dashboard/campanas/${campaignId}`;
+
+      // Marcar éxito ANTES de navegar para que el link manual quede disponible si router.push falla.
+      setCampSuccess({
+        campaign_id: campaignId,
+        redirect_to: redirectTo,
+        total_recipients: Number(j.data?.total_recipients ?? 0),
+        valid_recipients: Number(j.data?.valid_recipients ?? 0),
+        invalid_recipients: Number(j.data?.invalid_recipients ?? 0),
+      });
+
+      // Navegar con try/catch; si falla, el banner muestra link manual.
+      try {
+        router.push(redirectTo);
+      } catch (navErr) {
+        // Sin throw: el usuario igual ve el banner con link.
+        console.warn("[etiquetas] router.push falló, link manual disponible", navErr);
+      }
     } catch (e) {
+      // Catch-all: cualquier error inesperado lo mostramos como mensaje, no como crash.
       setCampError(e instanceof Error ? e.message : "Error al crear campaña");
     } finally {
       setCampSubmitting(false);
@@ -562,6 +622,8 @@ export default function EtiquetasClient() {
     campHeaderImageUrl,
     selectedTemplateNeedsHeader,
     router,
+    campSubmitting,
+    campSuccess,
   ]);
 
   // Auto-trigger: paso 2 → cargar templates; paso 3 → cargar audiencia.
@@ -952,6 +1014,37 @@ export default function EtiquetasClient() {
                 </div>
               )}
 
+              {/* ETQ-CAMP-FIX-3: banner de éxito con link manual a la campaña */}
+              {campSuccess && (
+                <div className="mb-3 rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">
+                  <div className="flex items-start gap-2">
+                    <Send size={14} className="mt-0.5 shrink-0 text-emerald-600" />
+                    <div className="space-y-1">
+                      <div className="font-semibold">Campaña borrador creada correctamente.</div>
+                      <div className="text-xs">
+                        ID: <span className="font-mono">{campSuccess.campaign_id}</span>
+                      </div>
+                      <div className="text-xs">
+                        Destinatarios cargados: {campSuccess.valid_recipients} válidos
+                        {campSuccess.invalid_recipients > 0
+                          ? ` · ${campSuccess.invalid_recipients} inválidos`
+                          : ""}{" "}
+                        (status <span className="font-semibold">draft</span>, sin envío).
+                      </div>
+                      <div className="pt-1.5">
+                        <a
+                          href={campSuccess.redirect_to}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
+                        >
+                          Abrir campaña en /dashboard/campanas
+                          <ChevronRight size={12} />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {campStep === 1 && (
                 <div className="space-y-3">
                   <p className="text-sm text-slate-700">
@@ -1101,7 +1194,7 @@ export default function EtiquetasClient() {
                         </div>
                       </div>
 
-                      {campAudience.warnings.length > 0 && (
+                      {Array.isArray(campAudience.warnings) && campAudience.warnings.length > 0 && (
                         <div className="space-y-1.5">
                           {campAudience.warnings.map((w, i) => (
                             <div
@@ -1115,7 +1208,7 @@ export default function EtiquetasClient() {
                         </div>
                       )}
 
-                      {campAudience.sample_recipients.length > 0 && (
+                      {Array.isArray(campAudience.sample_recipients) && campAudience.sample_recipients.length > 0 && (
                         <div>
                           <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">
                             Muestra (10 primeros)
@@ -1192,11 +1285,20 @@ export default function EtiquetasClient() {
                 <button
                   type="button"
                   onClick={submitCampaign}
-                  disabled={campSubmitting || !campAudience || (campAudience.valid_phone_count ?? 0) === 0}
+                  disabled={
+                    campSubmitting ||
+                    !!campSuccess ||
+                    !campAudience ||
+                    (campAudience.valid_phone_count ?? 0) === 0
+                  }
                   className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-emerald-600/25 transition-colors hover:bg-emerald-700 disabled:opacity-40"
                 >
                   <Send size={14} />
-                  {campSubmitting ? "Creando…" : "Crear campaña borrador"}
+                  {campSuccess
+                    ? "Campaña creada"
+                    : campSubmitting
+                      ? "Creando…"
+                      : "Crear campaña borrador"}
                 </button>
               )}
             </footer>
