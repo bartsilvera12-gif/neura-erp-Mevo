@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, X, RefreshCw, Filter, Copy, Tag as TagIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Search, X, RefreshCw, Filter, Copy, Tag as TagIcon, Send, ChevronRight, ChevronLeft, AlertTriangle } from "lucide-react";
 
 /**
  * Etiquetas Automáticas - Pantalla productiva.
@@ -109,6 +110,57 @@ const BTN_PRIMARY_CN =
 const BTN_SECONDARY_CN =
   "inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:bg-[#4FAEB2]/5 hover:text-[#3F8E91] disabled:opacity-50";
 
+// ETQ-CAMP-3: tipos del modal de campaña.
+interface CampanaTemplate {
+  id: string;
+  channel_id: string;
+  provider: string;
+  name: string;
+  language: string;
+  category: string | null;
+  status: string;
+  components_json?: unknown;
+}
+
+interface AudiencePreviewResp {
+  ok: boolean;
+  error?: string;
+  tag_code: string;
+  tag_label: string;
+  total_conversations: number;
+  total_unique_phones: number;
+  valid_phone_count: number;
+  invalid_phone_count: number;
+  outside_24h_count: number;
+  reactivated_excluded_count: number;
+  human_excluded_count: number;
+  recent_inbound_excluded_count: number;
+  duplicate_phone_count: number;
+  sample_recipients: Array<{
+    contact_id: string | null;
+    conversation_id: string;
+    contact_name: string | null;
+    phone_number: string | null;
+    days_idle: number | null;
+  }>;
+  warnings: Array<{ code: string; message: string }>;
+}
+
+function templateHasHeaderImage(components: unknown): boolean {
+  if (!Array.isArray(components)) return false;
+  for (const c of components) {
+    if (
+      c &&
+      typeof c === "object" &&
+      String((c as Record<string, unknown>).type ?? "").toUpperCase() === "HEADER" &&
+      String((c as Record<string, unknown>).format ?? "").toUpperCase() === "IMAGE"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export default function EtiquetasClient() {
   // Filtros (estado de inputs).
   const [tagCode, setTagCode] = useState("");
@@ -138,6 +190,21 @@ export default function EtiquetasClient() {
   const [modalLoading, setModalLoading] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [modalData, setModalData] = useState<ConversationPreviewResponse | null>(null);
+
+  // ETQ-CAMP-3: Modal "Crear campaña desde etiqueta".
+  const router = useRouter();
+  const [campModalOpen, setCampModalOpen] = useState(false);
+  const [campStep, setCampStep] = useState<1 | 2 | 3>(1);
+  const [campTagCode, setCampTagCode] = useState("");
+  const [campTemplates, setCampTemplates] = useState<CampanaTemplate[]>([]);
+  const [campTemplatesLoading, setCampTemplatesLoading] = useState(false);
+  const [campTemplateId, setCampTemplateId] = useState("");
+  const [campHeaderImageUrl, setCampHeaderImageUrl] = useState("");
+  const [campCampaignName, setCampCampaignName] = useState("");
+  const [campAudience, setCampAudience] = useState<AudiencePreviewResp | null>(null);
+  const [campAudienceLoading, setCampAudienceLoading] = useState(false);
+  const [campError, setCampError] = useState<string | null>(null);
+  const [campSubmitting, setCampSubmitting] = useState(false);
 
   const filtersActiveCount = useMemo(() => {
     let n = 0;
@@ -290,6 +357,166 @@ export default function EtiquetasClient() {
     return cards;
   }, [byCurrentTag, availableTags]);
 
+  // ETQ-CAMP-3: handlers del modal Crear campaña.
+  const openCampaignModal = useCallback(() => {
+    setCampStep(1);
+    setCampTagCode(tagCode || "");
+    setCampTemplateId("");
+    setCampHeaderImageUrl("");
+    setCampCampaignName("");
+    setCampAudience(null);
+    setCampError(null);
+    setCampModalOpen(true);
+  }, [tagCode]);
+
+  const closeCampaignModal = useCallback(() => {
+    setCampModalOpen(false);
+  }, []);
+
+  // Cuando entrás al paso 2, cargar templates aprobadas (cualquier canal Meta del tenant).
+  // El backend filtra por channel_id; acá pedimos sin channel_id y filtramos client-side.
+  // Templates ya vienen con channel_id; usamos el canal del template seleccionado al crear.
+  // Estrategia: traer templates de todos los canales WhatsApp activos vía /api/campanas/options + /api/campanas/templates.
+  const loadTemplates = useCallback(async () => {
+    setCampTemplatesLoading(true);
+    setCampError(null);
+    try {
+      // 1) Canales WhatsApp activos.
+      const optsRes = await fetch(`/api/campanas/options`, { cache: "no-store" });
+      const optsJson = (await optsRes.json()) as {
+        ok?: boolean;
+        data?: { channels?: Array<{ id: string; provider: string }> };
+        error?: string;
+      };
+      if (!optsRes.ok || optsJson.ok === false) {
+        setCampError(optsJson.error || "No se pudieron cargar los canales");
+        return;
+      }
+      const channels = optsJson.data?.channels ?? [];
+      if (channels.length === 0) {
+        setCampError("No hay canales WhatsApp activos");
+        return;
+      }
+      // 2) Templates aprobadas por cada canal (en paralelo, dedupe por template.id).
+      const all = await Promise.all(
+        channels.map(async (c) => {
+          const r = await fetch(
+            `/api/campanas/templates?channel_id=${encodeURIComponent(c.id)}`,
+            { cache: "no-store" }
+          );
+          const j = (await r.json()) as { ok?: boolean; data?: CampanaTemplate[]; error?: string };
+          return j.ok === false ? [] : j.data ?? [];
+        })
+      );
+      const seen = new Set<string>();
+      const merged: CampanaTemplate[] = [];
+      for (const arr of all) {
+        for (const t of arr) {
+          if (!seen.has(t.id) && String(t.status).toUpperCase() === "APPROVED") {
+            seen.add(t.id);
+            merged.push(t);
+          }
+        }
+      }
+      setCampTemplates(merged);
+    } catch (e) {
+      setCampError(e instanceof Error ? e.message : "Error al cargar templates");
+    } finally {
+      setCampTemplatesLoading(false);
+    }
+  }, []);
+
+  const loadAudiencePreview = useCallback(async () => {
+    if (!campTagCode) return;
+    setCampAudienceLoading(true);
+    setCampError(null);
+    try {
+      const sp = new URLSearchParams({
+        tag_code: campTagCode,
+        limit: "10",
+        exclude_reactivated: "true",
+        exclude_human_taken_over: "true",
+        exclude_recent_inbound_hours: "24",
+        dedupe_by_phone: "true",
+      });
+      const r = await fetch(`/api/chat/tags/audience-preview?${sp.toString()}`, { cache: "no-store" });
+      const j = (await r.json()) as AudiencePreviewResp;
+      if (!r.ok || (j as { ok?: boolean }).ok === false) {
+        setCampError((j as { error?: string }).error || "No se pudo cargar audiencia");
+        return;
+      }
+      setCampAudience(j);
+    } catch (e) {
+      setCampError(e instanceof Error ? e.message : "Error cargando audiencia");
+    } finally {
+      setCampAudienceLoading(false);
+    }
+  }, [campTagCode]);
+
+  const selectedTemplate = useMemo(
+    () => campTemplates.find((t) => t.id === campTemplateId) || null,
+    [campTemplates, campTemplateId]
+  );
+  const selectedTemplateNeedsHeader = useMemo(
+    () => (selectedTemplate ? templateHasHeaderImage(selectedTemplate.components_json) : false),
+    [selectedTemplate]
+  );
+
+  const submitCampaign = useCallback(async () => {
+    setCampSubmitting(true);
+    setCampError(null);
+    try {
+      const body: Record<string, unknown> = {
+        tag_code: campTagCode,
+        template_id: campTemplateId,
+        exclude_reactivated: true,
+        exclude_human_taken_over: true,
+        exclude_recent_inbound_hours: 24,
+        dedupe_by_phone: true,
+      };
+      if (campCampaignName.trim()) body.campaign_name = campCampaignName.trim();
+      if (selectedTemplateNeedsHeader) body.header_image_url = campHeaderImageUrl.trim();
+      const r = await fetch(`/api/chat/tags/create-campaign-from-tag`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        cache: "no-store",
+      });
+      const j = (await r.json()) as {
+        ok?: boolean;
+        data?: { campaign_id: string; redirect_to: string };
+        error?: string;
+      };
+      if (!r.ok || j.ok === false || !j.data?.campaign_id) {
+        setCampError(j.error || "No se pudo crear la campaña");
+        return;
+      }
+      // Redirigir a Campañas para revisar antes de enviar.
+      router.push(j.data.redirect_to);
+    } catch (e) {
+      setCampError(e instanceof Error ? e.message : "Error al crear campaña");
+    } finally {
+      setCampSubmitting(false);
+    }
+  }, [
+    campTagCode,
+    campTemplateId,
+    campCampaignName,
+    campHeaderImageUrl,
+    selectedTemplateNeedsHeader,
+    router,
+  ]);
+
+  // Auto-trigger: paso 2 → cargar templates; paso 3 → cargar audiencia.
+  useEffect(() => {
+    if (campModalOpen && campStep === 2 && campTemplates.length === 0 && !campTemplatesLoading) {
+      void loadTemplates();
+    }
+    if (campModalOpen && campStep === 3 && !campAudience && !campAudienceLoading) {
+      void loadAudiencePreview();
+    }
+  }, [campModalOpen, campStep, campTemplates.length, campTemplatesLoading, campAudience, campAudienceLoading, loadTemplates, loadAudiencePreview]);
+
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <header className="mb-5 flex flex-wrap items-start justify-between gap-4">
@@ -302,11 +529,22 @@ export default function EtiquetasClient() {
             </p>
           </div>
         </div>
-        <div className="inline-flex max-w-md items-start gap-2 rounded-xl border border-[#4FAEB2]/30 bg-[#4FAEB2]/5 px-3 py-2 text-xs font-medium text-slate-700 shadow-sm">
-          <TagIcon size={14} className="mt-0.5 shrink-0 text-[#4FAEB2]" />
-          <span>
-            Las conversaciones etiquetadas salen de Conversaciones. Si el cliente vuelve a escribir, reaparecen automáticamente.
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="inline-flex max-w-md items-start gap-2 rounded-xl border border-[#4FAEB2]/30 bg-[#4FAEB2]/5 px-3 py-2 text-xs font-medium text-slate-700 shadow-sm">
+            <TagIcon size={14} className="mt-0.5 shrink-0 text-[#4FAEB2]" />
+            <span>
+              Las conversaciones etiquetadas salen de Conversaciones. Si el cliente vuelve a escribir, reaparecen automáticamente.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={openCampaignModal}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-emerald-600/25 transition-colors hover:bg-emerald-700"
+            title="Crear campaña WhatsApp a partir de una etiqueta"
+          >
+            <Send size={14} />
+            Crear campaña
+          </button>
         </div>
       </header>
 
@@ -614,6 +852,279 @@ export default function EtiquetasClient() {
             </div>
             <footer className="border-t border-slate-200 bg-white p-3 text-[11px] text-slate-500">
               Vista de conversación. No envía mensajes ni modifica el chat.
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {/* ETQ-CAMP-3: Modal "Crear campaña desde etiqueta" */}
+      {campModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+          onClick={closeCampaignModal}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-emerald-600/40 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white p-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Send size={16} className="text-emerald-600" />
+                  Crear campaña desde etiqueta
+                </div>
+                <div className="text-xs text-slate-500">Paso {campStep} de 3 · La campaña queda en borrador</div>
+              </div>
+              <button
+                onClick={closeCampaignModal}
+                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm transition-colors hover:border-emerald-500/40 hover:bg-emerald-50 hover:text-emerald-700"
+                type="button"
+                aria-label="Cerrar"
+              >
+                <X size={16} />
+              </button>
+            </header>
+
+            <div className="flex-1 overflow-y-auto bg-slate-50 p-5">
+              {campError && (
+                <div className="mb-3 inline-flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-rose-600" />
+                  <span>{campError}</span>
+                </div>
+              )}
+
+              {campStep === 1 && (
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-700">
+                    Elegí la etiqueta cuyas conversaciones querés usar como audiencia.
+                  </p>
+                  <select
+                    value={campTagCode}
+                    onChange={(e) => {
+                      setCampTagCode(e.target.value);
+                      setCampAudience(null);
+                    }}
+                    className={SELECT_CN}
+                  >
+                    <option value="">— elegí una etiqueta —</option>
+                    {availableTags.map((t) => (
+                      <option key={t.tag_code} value={t.tag_code}>{t.tag_label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {campStep === 2 && (
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-700">Elegí la plantilla aprobada por Meta.</p>
+                  {campTemplatesLoading && (
+                    <div className="text-sm text-slate-500">Cargando plantillas…</div>
+                  )}
+                  {!campTemplatesLoading && campTemplates.length === 0 && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      No hay plantillas aprobadas. Sincronizalas desde Configuración → Canales.
+                    </div>
+                  )}
+                  <div className="grid gap-2">
+                    {campTemplates.map((t) => {
+                      const selected = campTemplateId === t.id;
+                      const needsHeader = templateHasHeaderImage(t.components_json);
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setCampTemplateId(t.id)}
+                          className={`rounded-xl border bg-white p-3 text-left shadow-sm transition-colors ${
+                            selected
+                              ? "border-emerald-500 ring-2 ring-emerald-500/25"
+                              : "border-slate-200 hover:border-emerald-400/60 hover:bg-emerald-50/30"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-900">{t.name}</div>
+                              <div className="text-xs text-slate-500">
+                                {t.language} · {t.category ?? "—"} · {t.provider}
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                                APPROVED
+                              </span>
+                              {needsHeader && (
+                                <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-200">
+                                  Necesita imagen
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedTemplateNeedsHeader && (
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-slate-600">
+                        Header image URL (HTTPS, obligatoria)
+                      </label>
+                      <input
+                        value={campHeaderImageUrl}
+                        onChange={(e) => setCampHeaderImageUrl(e.target.value)}
+                        placeholder="https://ejemplo.com/banner.jpg"
+                        className={INPUT_CN}
+                      />
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-slate-600">
+                      Nombre de la campaña (opcional)
+                    </label>
+                    <input
+                      value={campCampaignName}
+                      onChange={(e) => setCampCampaignName(e.target.value)}
+                      placeholder={`Etiqueta ${campTagCode} — ${new Date().toISOString().slice(0, 10)}`}
+                      className={INPUT_CN}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {campStep === 3 && (
+                <div className="space-y-3">
+                  {campAudienceLoading && (
+                    <div className="text-sm text-slate-500">Calculando audiencia…</div>
+                  )}
+                  {!campAudienceLoading && campAudience && (
+                    <>
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Total conversaciones</div>
+                          <div className="mt-1 text-xl font-semibold text-slate-900">{campAudience.total_conversations}</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Únicos por teléfono</div>
+                          <div className="mt-1 text-xl font-semibold text-slate-900">{campAudience.total_unique_phones}</div>
+                        </div>
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+                          <div className="text-[10px] uppercase tracking-wide text-emerald-700">Teléfonos válidos</div>
+                          <div className="mt-1 text-xl font-semibold text-emerald-800">{campAudience.valid_phone_count}</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Excluidos: inbound reciente</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-700">{campAudience.recent_inbound_excluded_count}</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Excluidos: humano</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-700">{campAudience.human_excluded_count}</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Excluidos: reactivados</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-700">{campAudience.reactivated_excluded_count}</div>
+                        </div>
+                      </div>
+
+                      {campAudience.warnings.length > 0 && (
+                        <div className="space-y-1.5">
+                          {campAudience.warnings.map((w, i) => (
+                            <div
+                              key={`${w.code}-${i}`}
+                              className="inline-flex w-full items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                            >
+                              <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-600" />
+                              <span>{w.message}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {campAudience.sample_recipients.length > 0 && (
+                        <div>
+                          <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">
+                            Muestra (10 primeros)
+                          </div>
+                          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                            <table className="w-full text-xs">
+                              <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wide text-slate-500">
+                                <tr>
+                                  <th className="px-3 py-1.5">Contacto</th>
+                                  <th className="px-3 py-1.5">Teléfono</th>
+                                  <th className="px-3 py-1.5">Días inactivo</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {campAudience.sample_recipients.map((r) => (
+                                  <tr key={r.conversation_id}>
+                                    <td className="px-3 py-1.5">{r.contact_name || "—"}</td>
+                                    <td className="px-3 py-1.5 font-mono">{r.phone_number || "—"}</td>
+                                    <td className="px-3 py-1.5">{r.days_idle != null ? `${r.days_idle}d` : "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <footer className="flex items-center justify-between gap-2 border-t border-slate-200 bg-white p-3">
+              <button
+                type="button"
+                onClick={() => setCampStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s))}
+                disabled={campStep === 1 || campSubmitting}
+                className={`${BTN_SECONDARY_CN} disabled:opacity-40`}
+              >
+                <ChevronLeft size={14} />
+                Anterior
+              </button>
+              <div className="text-[11px] text-slate-500">
+                {campStep === 3
+                  ? "Al confirmar, la campaña queda como borrador para revisión en Campañas."
+                  : ""}
+              </div>
+              {campStep < 3 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCampError(null);
+                    if (campStep === 1 && !campTagCode) {
+                      setCampError("Elegí una etiqueta antes de continuar");
+                      return;
+                    }
+                    if (campStep === 2 && !campTemplateId) {
+                      setCampError("Elegí una plantilla aprobada antes de continuar");
+                      return;
+                    }
+                    if (campStep === 2 && selectedTemplateNeedsHeader && !campHeaderImageUrl.trim()) {
+                      setCampError("Esta plantilla requiere una imagen de header HTTPS");
+                      return;
+                    }
+                    setCampStep((s) => ((s + 1) as 1 | 2 | 3));
+                  }}
+                  disabled={campSubmitting}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-emerald-600/25 transition-colors hover:bg-emerald-700 disabled:opacity-40"
+                >
+                  Siguiente
+                  <ChevronRight size={14} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={submitCampaign}
+                  disabled={campSubmitting || !campAudience || (campAudience.valid_phone_count ?? 0) === 0}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-emerald-600/25 transition-colors hover:bg-emerald-700 disabled:opacity-40"
+                >
+                  <Send size={14} />
+                  {campSubmitting ? "Creando…" : "Crear campaña borrador"}
+                </button>
+              )}
             </footer>
           </div>
         </div>
