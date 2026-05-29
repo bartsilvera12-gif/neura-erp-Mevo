@@ -666,6 +666,7 @@ export async function GET(request: Request) {
           modo_periodo: period.modoPeriodo,
           fecha_inicio_local: desdeYmd,
           fecha_fin_local: hastaYmd,
+          fecha_liquidacion_local: period.fechaLiquidacionLocal,
           periodo_inicio_utc: period.periodoInicioUtcIso,
           periodo_fin_utc: period.periodoFinUtcIso,
           periodo_mes: period.fechaInicioLocal.slice(0, 7),

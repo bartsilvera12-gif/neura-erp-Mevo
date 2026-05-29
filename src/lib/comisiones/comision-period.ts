@@ -1,7 +1,9 @@
 /**
- * Período de preview para modo `mensual_penultimo_dia_habil`:
- * desde el día 1 del mes calendario en la zona horaria de la política
- * hasta el penúltimo día hábil del mismo mes (23:59:59.999 local).
+ * Período de preview comisionable: mes calendario completo en la zona horaria
+ * de la política, desde el día 1 hasta el último día calendario del mes
+ * (23:59:59.999 local). El penúltimo día hábil ya NO recorta el período;
+ * se conserva sólo como fecha administrativa/informativa de liquidación
+ * (`fechaLiquidacionLocal`). Así ningún pago queda en "zona muerta".
  */
 
 export type PeriodBounds = {
@@ -9,6 +11,11 @@ export type PeriodBounds = {
   modoPeriodo: string;
   fechaInicioLocal: string;
   fechaFinLocal: string;
+  /**
+   * Fecha administrativa/informativa de liquidación (penúltimo día hábil del mes).
+   * NO se usa para incluir/excluir pagos del período comisionable.
+   */
+  fechaLiquidacionLocal: string;
   /** Inicio inclusivo en UTC (ISO). */
   periodoInicioUtcIso: string;
   /** Fin inclusivo en UTC (ISO). */
@@ -137,10 +144,12 @@ export function computePreviewPeriod(
 
   const startMs = utcMillisForLocalWallClock({ y, mo, d: 1, hh: 0, mi: 0, ss: 0 }, useTz);
 
-  let lastDay = penultimateBusinessDayOfMonth(y, mo, useTz);
-  if (modo !== "mensual_penultimo_dia_habil") {
-    lastDay = daysInMonth(y, mo);
-  }
+  // El período comisionable abarca SIEMPRE el mes calendario completo:
+  // el penúltimo día hábil dejó de recortar el período (eliminaba pagos del
+  // último día hábil / fin de semana, creando una "zona muerta"). Se conserva
+  // sólo como dato administrativo de liquidación (`fechaLiquidacionLocal`).
+  const lastDay = daysInMonth(y, mo);
+  const liquidacionDay = penultimateBusinessDayOfMonth(y, mo, useTz);
 
   const endMsRaw = utcMillisForLocalWallClock({ y, mo, d: lastDay, hh: 23, mi: 59, ss: 59 }, useTz);
   const endMs = endMsRaw + 999;
@@ -161,6 +170,7 @@ export function computePreviewPeriod(
     modoPeriodo: modo,
     fechaInicioLocal: ymdKey(y, mo, 1),
     fechaFinLocal: ymdKey(y, mo, lastDay),
+    fechaLiquidacionLocal: ymdKey(y, mo, liquidacionDay),
     periodoInicioUtcIso: new Date(startMs).toISOString(),
     periodoFinUtcIso: new Date(endMs).toISOString(),
     etiquetaMes,
