@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { FacturaElectronicaPanel } from "@/components/sifen/FacturaElectronicaPanel";
+import { AnularFacturaButton } from "@/components/facturas/AnularFacturaButton";
 import type { FacturaElectronicaDTO, SifenCancelacionPreviewDTO } from "@/lib/sifen/types";
 
 type FacturaApiRow = {
@@ -185,6 +186,12 @@ function FacturaDetalleInner() {
           >
             Imprimir
           </button>
+          <AnularFacturaButton
+            facturaId={id}
+            estado={factura.estado}
+            variant="full"
+            onAnulada={reloadFacturaComercial}
+          />
         </div>
       </div>
 
