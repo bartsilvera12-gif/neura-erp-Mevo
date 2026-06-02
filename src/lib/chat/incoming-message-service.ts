@@ -14,6 +14,9 @@ import type { SupabaseAdmin } from "@/lib/chat/types";
 import { normalizeWaPhone } from "@/lib/chat/wa-phone";
 import { getChatPostgresPool } from "@/lib/supabase/chat-pg-pool";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
+import { createTenantPgChatSupabaseShim } from "@/lib/chat/tenant-pg-chat-supabase-shim";
+import type { AppSupabaseClient } from "@/lib/supabase/schema";
+import { isSingleClientMode, getSingleClientSchemaOrNull } from "@/lib/instance/single-client";
 
 export const CHAT_CHANNEL_TYPES = ["whatsapp", "instagram", "facebook", "email", "linkedin"] as const;
 export type ChatChannelType = (typeof CHAT_CHANNEL_TYPES)[number];
@@ -128,7 +131,6 @@ export async function persistInboundChatMessageAndBump(
   input: PersistInboundChatMessageInput
 ): Promise<PersistInboundChatMessageResult> {
   const {
-    supabase,
     empresaId,
     conversationId,
     externalMessageId,
@@ -141,6 +143,25 @@ export async function persistInboundChatMessageAndBump(
     senderType = "contact",
     conversationState,
   } = input;
+
+  /**
+   * single_client: persistencia inbound DETERMINÍSTICA en NEURA_CLIENT_SCHEMA vía shim PG directo
+   * (bypass PostgREST/RLS). Reutiliza el shim existente (cubre insert+bump). Si no hay pool/schema,
+   * cae al cliente recibido (PostgREST service-role, que en multi-tenant es el comportamiento actual).
+   */
+  let supabase = input.supabase;
+  if (isSingleClientMode()) {
+    const scSchema = getSingleClientSchemaOrNull();
+    const scPool = getChatPostgresPool();
+    if (scSchema && scPool) {
+      supabase = createTenantPgChatSupabaseShim({
+        pool: scPool,
+        schema: scSchema,
+        storageDelegate: input.supabase,
+        rpcDelegate: input.supabase as unknown as AppSupabaseClient,
+      });
+    }
+  }
 
   const { data: insertedMsg, error: insErr } = await supabase
     .from("chat_messages")

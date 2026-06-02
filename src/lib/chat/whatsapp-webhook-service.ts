@@ -5,6 +5,7 @@ import {
 import { createFlowEngine } from "@/lib/chat/flow-engine-service";
 import { flowTrace } from "@/lib/chat/flow-trace-log";
 import { persistInboundChatMessageAndBump } from "@/lib/chat/incoming-message-service";
+import { isSingleClientMode } from "@/lib/instance/single-client";
 import { assignConversation } from "@/lib/chat/assign-conversation-service";
 import { assignConversationPg } from "@/lib/chat/webhooks/assign-conversation-pg";
 import { createTenantPgChatSupabaseShim } from "@/lib/chat/tenant-pg-chat-supabase-shim";
@@ -801,6 +802,54 @@ export async function processInboundWebhookValue(
       }
 
       const conversationId = existingConv.id as string;
+
+      /**
+       * Early-persist (single_client): guardar el inbound INMEDIATAMENTE (idempotente), antes de
+       * restart-intent / CRM / flow-engine, para que el mensaje del usuario quede en chat_messages
+       * aunque un paso posterior tire excepción. persistInboundChatMessageAndBump rutea por PG directo
+       * en single_client y tolera duplicados (23505). El bloque de persistencia posterior detecta
+       * `inboundMessageAlreadyPersisted` y reutiliza la fila (no doble-inserta).
+       */
+      if (isSingleClientMode() && !inboundMessageAlreadyPersisted) {
+        const early = await persistInboundChatMessageAndBump({
+          supabase,
+          empresaId,
+          conversationId,
+          externalMessageId: waMid,
+          messageType: message_type,
+          content,
+          rawPayload: msg as unknown as Record<string, unknown>,
+          timestampIso: ts,
+          preview,
+          fromMe: false,
+          senderType: "contact",
+          conversationState: {
+            flow_code: (existingConv as { flow_code?: string | null }).flow_code ?? null,
+            flow_current_node:
+              (existingConv as { flow_current_node?: string | null }).flow_current_node ?? null,
+            flow_status: (existingConv as { flow_status?: string | null }).flow_status ?? "bot",
+            human_taken_over: Boolean(
+              (existingConv as { human_taken_over?: boolean | null }).human_taken_over
+            ),
+            unread_count: (existingConv.unread_count as number) ?? 0,
+            status: (existingConv.status as string) ?? "open",
+          },
+        });
+        if (early.ok || early.duplicate) {
+          inboundMessageAlreadyPersisted = true;
+          console.info(WH_MSG, "early_inbound_persist_ok", {
+            conversationId,
+            wa_mid: waMid,
+            duplicate: !early.ok,
+          });
+        } else {
+          console.warn(WH_MSG, "early_inbound_persist_failed", {
+            conversationId,
+            wa_mid: waMid,
+            error: early.error,
+          });
+        }
+      }
 
       await ensureCentralChatConversationMirror({
         pool: pool ?? null,
