@@ -4,6 +4,7 @@ import type { Pool } from "pg";
 import { getChatPostgresPool } from "@/lib/supabase/chat-pg-pool";
 import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 import { schemaHasHiddenByTagColumn } from "@/lib/chat/tags/has-hidden-by-tag-column";
+import { getSingleClientSchemaOrNull } from "@/lib/instance/single-client";
 
 /**
  * Etiquetas Automáticas - FASE 6A.
@@ -36,11 +37,29 @@ import { schemaHasHiddenByTagColumn } from "@/lib/chat/tags/has-hidden-by-tag-co
 
 const ENABLED_TENANTS: Array<{ empresa_id: string; schema: string }> = [
   // Papu Store - único tenant con la migración de etiquetas aplicada hoy.
+  // NOTA: el `schema` aquí es el histórico Cloud (multi-tenant). En modo
+  // single_client se sobreescribe por NEURA_CLIENT_SCHEMA (ver resolveEnabledTenants).
   {
     empresa_id: "5ad0bdda-f94f-446c-9032-1fedf34e8479",
     schema: "erp_el_papu_store_5ad0bdda",
   },
 ];
+
+/**
+ * Lista efectiva de tenants a procesar.
+ *
+ * - single_client (NEURA_INSTANCE_MODE=single_client): el schema operativo es
+ *   NEURA_CLIENT_SCHEMA (p.ej. `elpapustore_erp`), NO el schema Cloud histórico.
+ *   El `empresa_id` NO cambia entre Cloud y self-hosted, así que se conserva.
+ * - multi_tenant: se mantiene la lista legacy sin cambios (no rompe otros clientes).
+ */
+function resolveEnabledTenants(): Array<{ empresa_id: string; schema: string }> {
+  const singleSchema = getSingleClientSchemaOrNull();
+  if (singleSchema) {
+    return ENABLED_TENANTS.map((t) => ({ ...t, schema: singleSchema }));
+  }
+  return ENABLED_TENANTS;
+}
 
 const BUCKETS: Array<{ tag_code: string; purchase_condition: string }> = [
   { tag_code: "compro_varias", purchase_condition: "purchased_multiple_tickets" },
@@ -313,16 +332,19 @@ async function handle(request: NextRequest) {
   const batchId = randomUUID();
   const startedAt = new Date().toISOString();
 
+  const enabledTenants = resolveEnabledTenants();
+
   console.info("[chat-tags][cron-daily] start", {
     run_key: runKey,
     batch_id_short: batchId.slice(0, 8),
     apply,
     max_batch: maxBatch,
-    tenants_count: ENABLED_TENANTS.length,
+    tenants_count: enabledTenants.length,
+    schemas: enabledTenants.map((t) => t.schema),
   });
 
   const tenants: TenantResult[] = [];
-  for (const tenant of ENABLED_TENANTS) {
+  for (const tenant of enabledTenants) {
     const r = await processTenant(pool, tenant, { apply, maxBatch, runKey, batchId });
     tenants.push(r);
     console.info("[chat-tags][cron-daily] tenant", {
