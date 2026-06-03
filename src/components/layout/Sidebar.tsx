@@ -180,7 +180,14 @@ const MENU_STRUCTURE: MenuItem[] = [
     label: "Sorteos",
     href: "/sorteos",
     icon: Ticket,
-    children: [{ label: "Tickets / Comprobantes", href: "/sorteos/tickets", exactMatch: true }],
+    // El Papu Store (single_client elpapustore_erp): dentro de Sorteos ya existen las
+    // pestañas internas que llevan a Tickets/Comprobantes, así que se oculta el subitem
+    // duplicado del sidebar. Guarda tenant-only: otros clientes mantienen el subitem.
+    // La ruta /sorteos/tickets sigue existiendo (no se rompe).
+    children:
+      process.env.NEXT_PUBLIC_NEURA_CLIENT_SCHEMA === "elpapustore_erp"
+        ? undefined
+        : [{ label: "Tickets / Comprobantes", href: "/sorteos/tickets", exactMatch: true }],
   },
   {
     key: "etiquetas",
