@@ -1,6 +1,8 @@
 import Link from "next/link";
 import {
   fetchSorteoEntradasServer,
+  fetchSorteosListServer,
+  pickDefaultSorteoId,
   type SorteoEntradasListParams,
 } from "@/lib/sorteos/server-queries";
 import type { SorteoEntradaEstadoPago } from "@/lib/sorteos/types";
@@ -86,11 +88,19 @@ export default async function SorteoEntradasPage({
       ? estadoRaw
       : undefined;
 
+  // Selector de sorteo. Por defecto carga el sorteo actual (activo más reciente) para
+  // evitar escanear todo el histórico. `all` = ver todos (opt-in explícito).
+  const { sorteos } = await fetchSorteosListServer();
+  const defaultSorteoId = pickDefaultSorteoId(sorteos);
+  const selectedSorteoId =
+    sorteoId === "all" ? null : sorteoId ?? defaultSorteoId ?? null;
+  const selectValue = sorteoId === "all" ? "all" : sorteoId ?? defaultSorteoId ?? "all";
+
   const listParams: SorteoEntradasListParams = {
     page,
     limit: 50,
     q: q ?? null,
-    sorteoId: sorteoId ?? null,
+    sorteoId: selectedSorteoId,
     estadoPago: estadoPago ?? null,
   };
 
@@ -180,13 +190,20 @@ export default async function SorteoEntradasPage({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Sorteo (UUID)</span>
-            <input
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Sorteo</span>
+            <select
               name="sorteo_id"
-              defaultValue={sorteoId ?? ""}
-              placeholder="opcional"
-              className="w-[260px] rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20"
-            />
+              defaultValue={selectValue}
+              className="w-[260px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20"
+            >
+              {sorteos.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nombre}
+                  {s.estado === "activo" ? " (activo)" : ""}
+                </option>
+              ))}
+              <option value="all">Todos los sorteos</option>
+            </select>
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Estado pago</span>

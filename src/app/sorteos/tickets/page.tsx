@@ -3,6 +3,21 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { getSorteos } from "@/lib/sorteos/actions";
+import type { Sorteo } from "@/lib/sorteos/types";
+
+/** Sorteo actual por defecto: activo más reciente; si no hay activo, el más reciente. */
+function pickDefaultSorteoIdClient(sorteos: Sorteo[]): string {
+  if (!sorteos.length) return "";
+  const recency = (s: Sorteo): number => {
+    const t = s.fecha_sorteo ?? s.created_at;
+    const n = t ? Date.parse(t) : NaN;
+    return Number.isFinite(n) ? n : 0;
+  };
+  const sorted = [...sorteos].sort((a, b) => recency(b) - recency(a));
+  const activo = sorted.find((s) => s.estado === "activo");
+  return (activo ?? sorted[0]).id;
+}
 
 type TicketRow = {
   id: string;
@@ -64,17 +79,20 @@ export default function SorteosTicketsPage() {
   const [rows, setRows] = useState<TicketRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [sorteos, setSorteos] = useState<Sorteo[]>([]);
   const [sorteoId, setSorteoId] = useState("");
   const [status, setStatus] = useState("");
   const [q, setQ] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  async function load() {
+  async function load(sorteoOverride?: string) {
     setLoading(true);
     setErr(null);
     try {
+      // sid: uuid (un sorteo), "all" (todos), o "" (deja que el server resuelva el actual).
+      const sid = (sorteoOverride ?? sorteoId).trim();
       const sp = new URLSearchParams();
-      if (sorteoId.trim()) sp.set("sorteo_id", sorteoId.trim());
+      if (sid) sp.set("sorteo_id", sid);
       if (status.trim()) sp.set("status", status.trim());
       if (q.trim()) sp.set("q", q.trim());
       const res = await fetchWithSupabaseSession(`/api/sorteos/tickets?${sp.toString()}`, {
@@ -93,7 +111,19 @@ export default function SorteosTicketsPage() {
   }
 
   useEffect(() => {
-    void load();
+    // Carga inicial: resolver el sorteo actual por defecto y traer solo sus tickets.
+    void (async () => {
+      let initialSorteoId = "";
+      try {
+        const list = await getSorteos();
+        setSorteos(list);
+        initialSorteoId = pickDefaultSorteoIdClient(list);
+        setSorteoId(initialSorteoId);
+      } catch {
+        // Si falla la lista, el server resuelve el sorteo actual igualmente.
+      }
+      await load(initialSorteoId);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- carga inicial; filtros con botón Filtrar
   }, []);
 
@@ -195,14 +225,26 @@ export default function SorteosTicketsPage() {
           </h3>
         </div>
         <div className="mt-4 flex flex-wrap items-end gap-3">
-          <div className="w-[14rem]">
-            <label className={LABEL_CLS}>Sorteo ID</label>
-            <input
-              className={`${INPUT_CLS} font-mono text-xs`}
+          <div className="w-[16rem]">
+            <label className={LABEL_CLS}>Sorteo</label>
+            <select
+              className={SELECT_CLS}
+              style={CHEVRON_STYLE}
               value={sorteoId}
-              onChange={(e) => setSorteoId(e.target.value)}
-              placeholder="uuid"
-            />
+              onChange={(e) => {
+                const v = e.target.value;
+                setSorteoId(v);
+                void load(v);
+              }}
+            >
+              {sorteos.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nombre}
+                  {s.estado === "activo" ? " (activo)" : ""}
+                </option>
+              ))}
+              <option value="all">Todos los sorteos</option>
+            </select>
           </div>
           <div className="w-[12rem]">
             <label className={LABEL_CLS}>Estado</label>

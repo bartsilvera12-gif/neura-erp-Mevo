@@ -3,6 +3,7 @@ import { getChatServiceClientForEmpresa } from "@/app/api/chat/_chat-service-cli
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
+import { pickDefaultSorteoId, type SorteoOption } from "@/lib/sorteos/server-queries";
 
 /**
  * GET /api/sorteos/tickets — lista entregas de tickets (reservorio).
@@ -15,11 +16,32 @@ export async function GET(request: NextRequest) {
     }
     const empresaId = ctx.auth.empresa_id;
     const url = new URL(request.url);
-    const sorteoId = url.searchParams.get("sorteo_id")?.trim() || "";
+    const sorteoParam = url.searchParams.get("sorteo_id")?.trim() || "";
     const status = url.searchParams.get("status")?.trim() || "";
     const q = url.searchParams.get("q")?.trim().toLowerCase() || "";
 
     const sb = await getChatServiceClientForEmpresa(empresaId);
+
+    // Default: si no se especifica sorteo, usar el actual (activo más reciente) para no
+    // traer el histórico completo. "all" = sin filtro (opt-in explícito).
+    let effectiveSorteoId = sorteoParam === "all" ? "" : sorteoParam;
+    if (!sorteoParam) {
+      const { data: sList } = await sb
+        .from("sorteos")
+        .select("id, nombre, estado, fecha_sorteo, created_at")
+        .eq("empresa_id", empresaId);
+      const opts: SorteoOption[] = Array.isArray(sList)
+        ? (sList as Record<string, unknown>[]).map((r) => ({
+            id: String(r.id),
+            nombre: typeof r.nombre === "string" ? r.nombre : "",
+            estado: typeof r.estado === "string" ? r.estado : "activo",
+            fecha_sorteo: r.fecha_sorteo != null ? String(r.fecha_sorteo) : null,
+            created_at: r.created_at != null ? String(r.created_at) : null,
+          }))
+        : [];
+      effectiveSorteoId = pickDefaultSorteoId(opts) ?? "";
+    }
+
     let query = sb
       .from("sorteo_ticket_deliveries")
       .select("*")
@@ -27,7 +49,7 @@ export async function GET(request: NextRequest) {
       .order("created_at", { ascending: false })
       .limit(200);
 
-    if (sorteoId) query = query.eq("sorteo_id", sorteoId);
+    if (effectiveSorteoId) query = query.eq("sorteo_id", effectiveSorteoId);
     if (status && ["pending", "generated", "sent", "error"].includes(status)) {
       query = query.eq("status", status);
     }
