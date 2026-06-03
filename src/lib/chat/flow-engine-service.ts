@@ -581,6 +581,26 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     return sendOutboundTextMessage(slice, text);
   }
 
+  /**
+   * Construye la definición aditiva `neura_interactive` (solo para la UI del inbox).
+   * NO altera lo que se envía a WhatsApp/Meta; solo se persiste para poder renderizar
+   * los botones/opciones como chips read-only en el chat del ERP.
+   */
+  function buildNeuraInteractiveFromOptions(
+    groupTitle: string,
+    opts: ReadonlyArray<{ meta_button_id: string; option_value?: string | null }>
+  ): Record<string, unknown> {
+    return {
+      kind: "buttons",
+      groupTitle,
+      items: opts.map((o) => ({
+        id: o.meta_button_id,
+        title: whatsAppInteractiveTitleFromOption(o as unknown as FlowOption),
+        payload: o.option_value ?? null,
+      })),
+    };
+  }
+
   async function persistOutgoingMessage(input: {
     conversation: ConversationFlowState;
     content: string;
@@ -589,6 +609,8 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     raw: unknown;
     senderType: "system" | "human" | "ai";
     automationSource: string;
+    /** Definición aditiva de botones para la UI (read-only). No afecta el envío a Meta. */
+    neuraInteractive?: Record<string, unknown> | null;
   }) {
     const ts = new Date().toISOString();
     await supabase.from("chat_messages").insert({
@@ -600,7 +622,10 @@ export function createFlowEngine(ctx: FlowEngineContext) {
       automation_source: input.automationSource,
       message_type: input.messageType,
       content: input.content,
-      raw_payload: (input.raw ?? {}) as Record<string, unknown>,
+      raw_payload: {
+        ...((input.raw ?? {}) as Record<string, unknown>),
+        ...(input.neuraInteractive ? { neura_interactive: input.neuraInteractive } : {}),
+      } as Record<string, unknown>,
     });
     await supabase
       .from("chat_conversations")
@@ -1438,6 +1463,7 @@ export function createFlowEngine(ctx: FlowEngineContext) {
         raw: send.raw,
         senderType: "system",
         automationSource: "flow_engine",
+        neuraInteractive: buildNeuraInteractiveFromOptions(g.groupTitle, g.options),
       });
 
       console.info("[flow-buttons-groups][group-sent]", {
@@ -1703,6 +1729,7 @@ export function createFlowEngine(ctx: FlowEngineContext) {
             raw: send.raw,
             senderType: "system",
             automationSource: "flow_engine",
+            neuraInteractive: buildNeuraInteractiveFromOptions(bodyText, options),
           });
         }
       } else if (node.node_type === "media") {
@@ -1926,6 +1953,7 @@ export function createFlowEngine(ctx: FlowEngineContext) {
           raw: send.raw,
           senderType: "system",
           automationSource: "flow_engine",
+          neuraInteractive: buildNeuraInteractiveFromOptions(bodyText, options),
         });
       }
     }
@@ -3900,6 +3928,15 @@ export function createFlowEngine(ctx: FlowEngineContext) {
             raw: ib.raw,
             senderType: "system",
             automationSource: "flow_engine",
+            neuraInteractive: {
+              kind: "buttons",
+              groupTitle: pipeline.sendInteractive.body,
+              items: pipeline.sendInteractive.buttons.map((b) => ({
+                id: b.id,
+                title: b.title,
+                payload: null,
+              })),
+            },
           });
         }
       }

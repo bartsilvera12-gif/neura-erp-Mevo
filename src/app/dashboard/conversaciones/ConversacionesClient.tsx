@@ -169,6 +169,30 @@ function displayFilenameForAttachment(message: ChatMessage): string {
   return message.message_type === "video" ? "Video" : "Archivo";
 }
 
+/**
+ * Lee la definición aditiva `neura_interactive` que el flow engine persiste en
+ * `raw_payload` para mensajes interactive nuevos. Devuelve los items para renderizar
+ * los botones como chips read-only. Si no existe (mensajes históricos / otros tipos),
+ * retorna null y la UI mantiene el render actual.
+ */
+function getNeuraInteractiveItems(
+  message: ChatMessage
+): { groupTitle: string | null; items: string[] } | null {
+  if (message.message_type !== "interactive") return null;
+  const ni = (message.raw_payload?.neura_interactive ?? null) as
+    | { groupTitle?: unknown; items?: Array<{ title?: unknown }> }
+    | null;
+  if (!ni || !Array.isArray(ni.items)) return null;
+  const items = ni.items
+    .map((it) => (typeof it?.title === "string" ? it.title.trim() : ""))
+    .filter((t) => t.length > 0);
+  if (items.length === 0) return null;
+  return {
+    groupTitle: typeof ni.groupTitle === "string" ? ni.groupTitle : null,
+    items,
+  };
+}
+
 function tabClass(active: boolean) {
   return `px-4 py-2 text-xs font-semibold rounded-xl transition-all ${
     active
@@ -3181,7 +3205,32 @@ export function ConversacionesClient({
                               );
                             })()
                           ) : (
-                            <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                            (() => {
+                              const ni = getNeuraInteractiveItems(m);
+                              return (
+                                <div className="space-y-1.5">
+                                  <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                                  {ni ? (
+                                    <div
+                                      className={`flex flex-col gap-1 border-t pt-1.5 ${m.from_me ? "border-white/25" : "border-slate-200"}`}
+                                    >
+                                      {ni.items.map((title, i) => (
+                                        <span
+                                          key={`${m.id}-opt-${i}`}
+                                          className={`inline-flex items-center justify-center rounded-lg border px-2.5 py-1 text-xs font-medium ${
+                                            m.from_me
+                                              ? "border-white/40 bg-white/10 text-white"
+                                              : "border-slate-200 bg-slate-50 text-slate-700"
+                                          }`}
+                                        >
+                                          {title}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })()
                           )}
                           <p
                             className={`text-[10px] mt-1 ${m.from_me ? "text-sky-100" : "text-slate-400"}`}
