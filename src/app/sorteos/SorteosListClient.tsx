@@ -193,6 +193,7 @@ function NavTabs() {
 export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosVentasKpis }) {
   const [rows, setRows] = useState<Sorteo[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [finalizandoId, setFinalizandoId] = useState<string | null>(null);
 
   useEffect(() => {
     getSorteos()
@@ -200,6 +201,34 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
       .catch(() => setRows([]))
       .finally(() => setCargando(false));
   }, []);
+
+  async function finalizarSorteo(id: string) {
+    if (
+      !window.confirm(
+        "¿Seguro que querés finalizar este sorteo? No se borrarán entradas, cupones ni tickets."
+      )
+    ) {
+      return;
+    }
+    setFinalizandoId(id);
+    try {
+      const res = await fetch(`/api/sorteos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estado: "finalizado" }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        window.alert(`No se pudo finalizar el sorteo${j?.error ? `: ${j.error}` : "."}`);
+        return;
+      }
+      setRows((prev) => prev.map((r) => (r.id === id ? { ...r, estado: "finalizado" } : r)));
+    } catch {
+      window.alert("No se pudo finalizar el sorteo (error de red).");
+    } finally {
+      setFinalizandoId(null);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -328,12 +357,26 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
                         {s.total_boletos_vendidos}
                       </td>
                       <td className="px-5 py-3 text-right">
-                        <Link
-                          href={`/sorteos/${s.id}/editar`}
-                          className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:bg-[#4FAEB2]/5 hover:text-[#3F8E91]"
-                        >
-                          Editar
-                        </Link>
+                        <div className="inline-flex items-center justify-end gap-2">
+                          {/* Finalizar: tenant-only El Papu Store. Otros clientes no se tocan. */}
+                          {s.estado === "activo" &&
+                          process.env.NEXT_PUBLIC_NEURA_CLIENT_SCHEMA === "elpapustore_erp" ? (
+                            <button
+                              type="button"
+                              onClick={() => finalizarSorteo(s.id)}
+                              disabled={finalizandoId === s.id}
+                              className="inline-flex items-center rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition-colors hover:border-rose-400 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {finalizandoId === s.id ? "Finalizando…" : "Finalizar"}
+                            </button>
+                          ) : null}
+                          <Link
+                            href={`/sorteos/${s.id}/editar`}
+                            className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:bg-[#4FAEB2]/5 hover:text-[#3F8E91]"
+                          >
+                            Editar
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   );
