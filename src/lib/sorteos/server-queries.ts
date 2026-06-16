@@ -288,6 +288,7 @@ async function fetchSorteoCuponesOrdenesPgDirect(
   const tCup = quoteSchemaTable(sch, "sorteo_cupones");
   const tSort = quoteSchemaTable(sch, "sorteos");
   const tCli = quoteSchemaTable(sch, "clientes");
+  const tFlowData = quoteSchemaTable(sch, "chat_flow_data");
 
   const { sql: whereSe, params: baseParams } = buildEntradaWhereParts(empresaId, listParams, 1, "se");
   const existsCupon = `EXISTS (
@@ -305,8 +306,22 @@ async function fetchSorteoCuponesOrdenesPgDirect(
 
   const limIdx = baseParams.length + 1;
   const offIdx = baseParams.length + 2;
+  // Ciudad: la fuente más completa es chat_flow_data (capturada al final del flujo);
+  // clientes.ciudad puede quedar vacía si el cliente ya existía. Preferimos flow_data
+  // y caemos a clientes. Subconsulta correlacionada sobre la página (LIMIT) → costo acotado.
   const listSql = `
-    SELECT se.*, cl.ciudad AS ciudad
+    SELECT se.*,
+      COALESCE(
+        (SELECT NULLIF(TRIM(fd.field_value), '')
+           FROM ${tFlowData} fd
+           WHERE fd.conversation_id = se.chat_conversation_id
+             AND fd.empresa_id = se.empresa_id
+             AND fd.field_name = 'ciudad'
+             AND NULLIF(TRIM(fd.field_value), '') IS NOT NULL
+           ORDER BY fd.created_at DESC
+           LIMIT 1),
+        NULLIF(TRIM(cl.ciudad), '')
+      ) AS ciudad
     FROM ${tEnt} se
     LEFT JOIN ${tCli} cl ON cl.id = se.cliente_id AND cl.empresa_id = se.empresa_id
     WHERE ${whereSe} AND ${existsCupon}
