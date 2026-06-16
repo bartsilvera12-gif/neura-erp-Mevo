@@ -287,6 +287,7 @@ async function fetchSorteoCuponesOrdenesPgDirect(
   const tEnt = quoteSchemaTable(sch, "sorteo_entradas");
   const tCup = quoteSchemaTable(sch, "sorteo_cupones");
   const tSort = quoteSchemaTable(sch, "sorteos");
+  const tCli = quoteSchemaTable(sch, "clientes");
 
   const { sql: whereSe, params: baseParams } = buildEntradaWhereParts(empresaId, listParams, 1, "se");
   const existsCupon = `EXISTS (
@@ -305,7 +306,9 @@ async function fetchSorteoCuponesOrdenesPgDirect(
   const limIdx = baseParams.length + 1;
   const offIdx = baseParams.length + 2;
   const listSql = `
-    SELECT se.* FROM ${tEnt} se
+    SELECT se.*, cl.ciudad AS ciudad
+    FROM ${tEnt} se
+    LEFT JOIN ${tCli} cl ON cl.id = se.cliente_id AND cl.empresa_id = se.empresa_id
     WHERE ${whereSe} AND ${existsCupon}
     ORDER BY se.created_at DESC NULLS LAST
     LIMIT $${limIdx}::int OFFSET $${offIdx}::int
@@ -373,6 +376,7 @@ async function fetchSorteoCuponesOrdenesPgDirect(
         documento:
           typeof r.documento === "string" && r.documento.trim() ? r.documento.trim() : null,
         whatsapp_numero: String(r.whatsapp_numero ?? ""),
+        ciudad: typeof r.ciudad === "string" && r.ciudad.trim() ? r.ciudad.trim() : null,
         cantidad_boletos: Number(r.cantidad_boletos ?? 0),
         monto_total: montoTotal,
         promo_nombre:
@@ -658,6 +662,7 @@ async function fetchSorteoCuponesOrdenesPostgrest(
         documento:
           typeof r.documento === "string" && r.documento.trim() ? r.documento.trim() : null,
         whatsapp_numero: String(r.whatsapp_numero ?? ""),
+        ciudad: typeof r.ciudad === "string" && r.ciudad.trim() ? r.ciudad.trim() : null,
         cantidad_boletos: Number(r.cantidad_boletos ?? 0),
         monto_total: montoTotal,
         promo_nombre:

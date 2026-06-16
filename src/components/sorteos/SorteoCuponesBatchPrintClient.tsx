@@ -243,6 +243,7 @@ export default function SorteoCuponesBatchPrintClient({
                   <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Cliente</th>
                   <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Cédula</th>
                   <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Teléfono</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Ciudad</th>
                   <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Cantidad</th>
                   <th className="px-5 py-3 text-right text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Monto</th>
                   <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Cupones</th>
@@ -274,6 +275,7 @@ export default function SorteoCuponesBatchPrintClient({
                       <td className="px-5 py-3 text-sm text-slate-800">{r.nombre_participante}</td>
                       <td className="px-5 py-3 text-sm font-mono text-slate-600">{r.documento ?? "—"}</td>
                       <td className="px-5 py-3 text-sm font-mono text-slate-700">{r.whatsapp_numero}</td>
+                      <td className="px-5 py-3 text-sm text-slate-700">{r.ciudad ?? "-"}</td>
                       <td className="px-5 py-3 text-sm text-slate-800">{r.cantidad_boletos}</td>
                       <td className="px-5 py-3 text-sm text-right tabular-nums text-slate-800">
                         {formatGs(r.monto_total)}

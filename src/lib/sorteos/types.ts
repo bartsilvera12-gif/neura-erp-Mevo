@@ -110,6 +110,8 @@ export type SorteoCuponOrdenRow = {
   nombre_participante: string;
   documento: string | null;
   whatsapp_numero: string;
+  /** Ciudad del comprador (clientes.ciudad vía sorteo_entradas.cliente_id). Null si no hay. */
+  ciudad: string | null;
   cantidad_boletos: number;
   monto_total: number;
   promo_nombre: string | null;
