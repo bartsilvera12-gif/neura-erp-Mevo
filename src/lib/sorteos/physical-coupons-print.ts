@@ -61,6 +61,8 @@ export type PhysicalCouponPrintRow = {
   documento: string | null;
   /** Teléfono completo (sin enmascarar): cupón físico operativo para urna/control interno. */
   whatsapp: string | null;
+  /** Ciudad del comprador (clientes.ciudad vía sorteo_entradas.cliente_id). Null si no hay. */
+  ciudad: string | null;
   /** Texto corto para la tarjeta: preferimos pago confirmado; si no hay, alta de la orden. */
   fecha_display: string;
 };
@@ -89,6 +91,12 @@ function normalizeDocumento(raw: string | null | undefined): string | null {
 }
 
 function normalizeWhatsapp(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const t = String(raw).trim();
+  return t || null;
+}
+
+function normalizeCiudad(raw: string | null | undefined): string | null {
   if (raw == null) return null;
   const t = String(raw).trim();
   return t || null;
@@ -152,6 +160,7 @@ function mapRow(args: {
   nombre_participante: string;
   documento: string | null;
   whatsapp_numero: string;
+  ciudad: string | null;
   fecha_pago: string | null;
   entrada_created_at: string;
 }): PhysicalCouponPrintRow {
@@ -165,6 +174,7 @@ function mapRow(args: {
     nombre_participante: nom,
     documento: normalizeDocumento(args.documento),
     whatsapp: normalizeWhatsapp(args.whatsapp_numero),
+    ciudad: normalizeCiudad(args.ciudad),
     fecha_display: formatFechaDisplay(ref),
   };
 }
@@ -202,6 +212,7 @@ async function fetchPhysicalCouponsPgDirect(
   const tCup = quoteSchemaTable(sch, "sorteo_cupones");
   const tEnt = quoteSchemaTable(sch, "sorteo_entradas");
   const tSort = quoteSchemaTable(sch, "sorteos");
+  const tCli = quoteSchemaTable(sch, "clientes");
 
   const params: unknown[] = [empresaId, sorteoId];
   let i = 3;
@@ -283,11 +294,13 @@ async function fetchPhysicalCouponsPgDirect(
       se.nombre_participante,
       se.documento,
       se.whatsapp_numero,
+      cl.ciudad AS ciudad,
       se.fecha_pago,
       se.created_at AS entrada_created_at
     FROM ${tCup} c
     INNER JOIN ${tEnt} se ON se.id = c.entrada_id AND se.empresa_id = c.empresa_id
     INNER JOIN ${tSort} so ON so.id = c.sorteo_id AND so.empresa_id = c.empresa_id
+    LEFT JOIN ${tCli} cl ON cl.id = se.cliente_id AND cl.empresa_id = se.empresa_id
     WHERE ${whereSql}
     ORDER BY c.created_at ASC NULLS LAST, c.numero_cupon ASC NULLS LAST
     LIMIT ${PHYSICAL_COUPONS_PRINT_MAX + 1}
@@ -312,6 +325,7 @@ async function fetchPhysicalCouponsPgDirect(
         nombre_participante: String(r.nombre_participante ?? ""),
         documento: r.documento != null ? String(r.documento) : null,
         whatsapp_numero: String(r.whatsapp_numero ?? ""),
+        ciudad: r.ciudad != null ? String(r.ciudad) : null,
         fecha_pago: r.fecha_pago != null ? String(r.fecha_pago) : null,
         entrada_created_at: String(r.entrada_created_at ?? ""),
       })
@@ -422,6 +436,9 @@ async function fetchPhysicalCouponsPostgrest(
         nombre_participante: String(se.nombre_participante ?? ""),
         documento: se.documento != null ? String(se.documento) : null,
         whatsapp_numero: String(se.whatsapp_numero ?? ""),
+        // Path PostgREST (tenants con schema expuesto): no embebemos clientes para no
+        // alterar a otros clientes. Papu usa el path pg-directo que sí trae ciudad.
+        ciudad: null,
         fecha_pago: fechaPago,
         entrada_created_at: entradaCreated,
       })

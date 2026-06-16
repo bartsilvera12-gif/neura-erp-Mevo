@@ -79,6 +79,7 @@ function renderCouponInner(row: PhysicalCouponPrintRow): string {
   const nombre = row.nombre_participante ? escapeHtml(row.nombre_participante) : "";
   const docLine = row.documento ? `<p>Doc. ${escapeHtml(row.documento)}</p>` : "";
   const telLine = row.whatsapp ? `<p>Tel. ${escapeHtml(row.whatsapp)}</p>` : "";
+  const ciudadLine = row.ciudad ? `<p>Ciudad: ${escapeHtml(row.ciudad)}</p>` : "";
   return `
     <div class="coupon-top">
       <p class="coupon-sorteo">${escapeHtml(row.sorteo_nombre)}</p>
@@ -89,6 +90,7 @@ function renderCouponInner(row: PhysicalCouponPrintRow): string {
       ${nombre ? `<p class="coupon-nombre">${nombre}</p>` : `<p class="coupon-nombre muted">—</p>`}
       ${docLine}
       ${telLine}
+      ${ciudadLine}
       <p class="coupon-fecha">${escapeHtml(row.fecha_display)}</p>
     </div>`;
 }
@@ -293,6 +295,7 @@ function CouponCard({ row }: { row: PhysicalCouponPrintRow }) {
         )}
         {row.documento ? <p className="break-words">Doc. {row.documento}</p> : null}
         {row.whatsapp ? <p className="break-words">Tel. {row.whatsapp}</p> : null}
+        {row.ciudad ? <p className="break-words">Ciudad: {row.ciudad}</p> : null}
         <p className="text-slate-500">{row.fecha_display}</p>
       </div>
     </article>
