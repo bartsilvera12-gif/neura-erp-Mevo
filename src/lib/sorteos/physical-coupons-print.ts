@@ -213,6 +213,7 @@ async function fetchPhysicalCouponsPgDirect(
   const tEnt = quoteSchemaTable(sch, "sorteo_entradas");
   const tSort = quoteSchemaTable(sch, "sorteos");
   const tCli = quoteSchemaTable(sch, "clientes");
+  const tFlowData = quoteSchemaTable(sch, "chat_flow_data");
 
   const params: unknown[] = [empresaId, sorteoId];
   let i = 3;
@@ -294,7 +295,17 @@ async function fetchPhysicalCouponsPgDirect(
       se.nombre_participante,
       se.documento,
       se.whatsapp_numero,
-      cl.ciudad AS ciudad,
+      COALESCE(
+        (SELECT NULLIF(TRIM(fd.field_value), '')
+           FROM ${tFlowData} fd
+           WHERE fd.conversation_id = se.chat_conversation_id
+             AND fd.empresa_id = se.empresa_id
+             AND fd.field_name IN ('ciudad', 'localidad', 'ubicacion')
+             AND NULLIF(TRIM(fd.field_value), '') IS NOT NULL
+           ORDER BY fd.created_at DESC
+           LIMIT 1),
+        NULLIF(TRIM(cl.ciudad), '')
+      ) AS ciudad,
       se.fecha_pago,
       se.created_at AS entrada_created_at
     FROM ${tCup} c
