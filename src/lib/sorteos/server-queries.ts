@@ -549,6 +549,80 @@ async function fetchSorteoEntradasPostgrest(
   };
 }
 
+/**
+ * Resuelve ciudad por entrada en el path PostgREST (schemas expuestos como `*_erp`).
+ * Fuente: chat_flow_data (field_name ciudad/localidad/ubicacion, último valor válido por
+ * conversación) → fallback clientes.ciudad → null. Hace 2 consultas batch (no por fila).
+ * `entradaRows` deben traer: id, chat_conversation_id, cliente_id. Devuelve { [entradaId]: ciudad }.
+ */
+export async function resolveCiudadByEntradaPostgrest(
+  sb: Awaited<ReturnType<typeof getChatServiceClientForEmpresa>>,
+  empresaId: string,
+  entradaRows: Record<string, unknown>[]
+): Promise<Record<string, string>> {
+  const convIds = [
+    ...new Set(
+      entradaRows
+        .map((r) => (r.chat_conversation_id == null ? "" : String(r.chat_conversation_id).trim()))
+        .filter(Boolean)
+    ),
+  ];
+  const cliIds = [
+    ...new Set(
+      entradaRows.map((r) => (r.cliente_id == null ? "" : String(r.cliente_id).trim())).filter(Boolean)
+    ),
+  ];
+
+  const byConv: Record<string, string> = {};
+  if (convIds.length > 0) {
+    const { data, error } = await sb
+      .from("chat_flow_data")
+      .select("conversation_id, field_value, created_at")
+      .eq("empresa_id", empresaId)
+      .in("conversation_id", convIds)
+      .in("field_name", ["ciudad", "localidad", "ubicacion"])
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.warn("[sorteos][ciudad-postgrest] chat_flow_data:", error.message);
+    } else {
+      for (const row of (data ?? []) as { conversation_id?: string; field_value?: string }[]) {
+        const c = String(row.conversation_id ?? "").trim();
+        const v = String(row.field_value ?? "").trim();
+        if (c && v && !byConv[c]) byConv[c] = v; // primera = más reciente (orden desc)
+      }
+    }
+  }
+
+  const byCli: Record<string, string> = {};
+  if (cliIds.length > 0) {
+    const { data, error } = await sb
+      .from("clientes")
+      .select("id, ciudad")
+      .eq("empresa_id", empresaId)
+      .in("id", cliIds);
+    if (error) {
+      console.warn("[sorteos][ciudad-postgrest] clientes:", error.message);
+    } else {
+      for (const row of (data ?? []) as { id?: string; ciudad?: string | null }[]) {
+        const c = String(row.id ?? "").trim();
+        const v = String(row.ciudad ?? "").trim();
+        if (c && v) byCli[c] = v;
+      }
+    }
+  }
+
+  const out: Record<string, string> = {};
+  for (const r of entradaRows) {
+    const eid = String(r.id ?? "").trim();
+    if (!eid) continue;
+    const conv = r.chat_conversation_id == null ? "" : String(r.chat_conversation_id).trim();
+    const cli = r.cliente_id == null ? "" : String(r.cliente_id).trim();
+    const c = (conv && byConv[conv]) || (cli && byCli[cli]) || "";
+    if (c) out[eid] = c;
+  }
+  return out;
+}
+
 async function fetchSorteoCuponesOrdenesPostgrest(
   empresaId: string,
   dataSchema: string,
@@ -649,6 +723,11 @@ async function fetchSorteoCuponesOrdenesPostgrest(
     }
   }
 
+  // Ciudad (path PostgREST): la fuente más completa es chat_flow_data (capturada al final del
+  // flujo); clientes.ciudad puede quedar vacía si el cliente ya existía. Preferimos flow_data por
+  // chat_conversation_id y caemos a clientes.ciudad. En batch (no una query por fila).
+  const ciudadByEntrada = await resolveCiudadByEntradaPostgrest(sb, empresaId, entradas);
+
   const mapped = entradas
     .map((raw) => {
       const r = normalizeRowTimestamps(raw);
@@ -694,6 +773,11 @@ async function fetchSorteoCuponesOrdenesPostgrest(
       };
     })
     .filter((x): x is SorteoCuponOrdenRow => x !== null);
+
+  // Completar ciudad (path PostgREST) desde el batch chat_flow_data → clientes.
+  for (const row of mapped) {
+    row.ciudad = ciudadByEntrada[row.entrada_id] ?? null;
+  }
 
   return {
     data: mapped,

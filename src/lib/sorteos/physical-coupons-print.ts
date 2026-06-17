@@ -12,6 +12,7 @@ import {
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { getEmpresaIdForCurrentUserServer } from "@/lib/supabase/empresa-data-server";
 import { getChatServiceClientForEmpresa } from "@/lib/supabase/chat-service-role-empresa";
+import { resolveCiudadByEntradaPostgrest } from "@/lib/sorteos/server-queries";
 
 const SOURCE = "src/lib/sorteos/physical-coupons-print.ts";
 
@@ -373,7 +374,9 @@ async function fetchPhysicalCouponsPostgrest(
         numero_orden,
         estado_pago,
         fecha_pago,
-        created_at
+        created_at,
+        chat_conversation_id,
+        cliente_id
       ),
       sorteos!inner ( nombre )
     `
@@ -413,6 +416,20 @@ async function fetchPhysicalCouponsPostgrest(
     };
   }
 
+  // Ciudad (path PostgREST): mismo criterio que el listado — chat_flow_data → fallback clientes.
+  const ciudadByEntrada = await resolveCiudadByEntradaPostgrest(
+    sb,
+    empresaId,
+    list.map((row) => {
+      const se = row.sorteo_entradas as Record<string, unknown> | null | undefined;
+      return {
+        id: row.entrada_id,
+        chat_conversation_id: se?.chat_conversation_id ?? null,
+        cliente_id: se?.cliente_id ?? null,
+      };
+    })
+  );
+
   const out: PhysicalCouponPrintRow[] = [];
 
   for (const row of list) {
@@ -447,9 +464,7 @@ async function fetchPhysicalCouponsPostgrest(
         nombre_participante: String(se.nombre_participante ?? ""),
         documento: se.documento != null ? String(se.documento) : null,
         whatsapp_numero: String(se.whatsapp_numero ?? ""),
-        // Path PostgREST (tenants con schema expuesto): no embebemos clientes para no
-        // alterar a otros clientes. Papu usa el path pg-directo que sí trae ciudad.
-        ciudad: null,
+        ciudad: ciudadByEntrada[String(row.entrada_id ?? "").trim()] ?? null,
         fecha_pago: fechaPago,
         entrada_created_at: entradaCreated,
       })
