@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthWithRol } from "@/lib/middleware/auth";
 import { getChatServiceClientForEmpresa } from "@/app/api/chat/_chat-service-client";
 import { createFlowEngine } from "@/lib/chat/flow-engine-service";
+import { isSorteoFinalTicketNode } from "@/lib/chat/sorteo-final-ticket-node";
 
 const EVENT_OK = "manual_current_node_resent" as const;
 const EVENT_FAIL = "manual_current_node_resend_failed" as const;
@@ -82,6 +83,34 @@ export async function POST(
           error:
             "La conversación está en modo humano. Confirmá si querés reenviar igualmente el mensaje del paso actual del bot.",
           needs_human_override_confirmation: true,
+        },
+        { status: 409 }
+      );
+    }
+
+    // FIX: no reenviar el nodo final de compra (p.ej. "compra_realizada") ni un paso de una
+    // sesión ya finalizada: reenviaría la confirmación/ticket de una orden vieja con flow_data vieja.
+    const activeSessionId = String(
+      (conv as { active_flow_session_id?: string | null }).active_flow_session_id ?? ""
+    ).trim();
+    let sessionCompleted = false;
+    if (activeSessionId) {
+      const { data: sessRow } = await supabase
+        .from("chat_flow_sessions")
+        .select("status")
+        .eq("id", activeSessionId)
+        .eq("empresa_id", auth.empresa_id)
+        .maybeSingle();
+      const st = String((sessRow as { status?: string } | null)?.status ?? "").trim().toLowerCase();
+      sessionCompleted = st === "completed";
+    }
+    if (sessionCompleted || isSorteoFinalTicketNode(nodeCode)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Esta compra ya está finalizada. No se reenvía el mensaje final ni el ticket de una orden anterior. Para una compra nueva, el cliente debe iniciar un nuevo flujo (escribir, por ejemplo, «comprar más»).",
+          purchase_already_finalized: true,
         },
         { status: 409 }
       );

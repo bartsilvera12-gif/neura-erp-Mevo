@@ -30,7 +30,10 @@ import {
   ycloudOutboundUnsupportedMessage,
 } from "@/lib/chat/outbound-send-dispatch";
 import type { SupabaseAdmin } from "@/lib/chat/types";
-import { ensureActiveFlowSessionForConversation } from "@/lib/chat/flow-session-service";
+import {
+  ensureActiveFlowSessionForConversation,
+  markConversationActiveSessionsEnded,
+} from "@/lib/chat/flow-session-service";
 import {
   applyCantidadFallbackOneIfMissing,
   applySorteoInteractiveCommercialContract,
@@ -388,6 +391,47 @@ function augmentSorteoPricingFromInteractiveOption(
     ];
   }
   return out;
+}
+
+/** Título visible de una respuesta interactiva (botón/lista) de WhatsApp. */
+function whatsappInteractiveReplyTitle(rawPayload: Record<string, unknown>): string {
+  const intr = (rawPayload?.interactive ?? null) as
+    | { button_reply?: { title?: string }; list_reply?: { title?: string } }
+    | null;
+  return (intr?.button_reply?.title ?? intr?.list_reply?.title ?? "").trim();
+}
+
+/** Frases de intención de compra (ya normalizadas: minúsculas, sin acentos). */
+const INTERACTIVE_PURCHASE_INTENT_PHRASES = [
+  "comprar mas",
+  "comprar otra vez",
+  "quiero comprar",
+  "comprar",
+  "mas numeros",
+  "quiero mas",
+  "otra vez",
+  "quiero participar",
+  "participar",
+  "mas boletas",
+];
+
+/**
+ * ¿El título de un botón interactivo expresa intención de comprar de nuevo?
+ * Solo se evalúa cuando el botón NO matchea una opción del nodo actual (caso invalid_button),
+ * así nunca interfiere con la selección legítima de combos.
+ */
+function interactiveReplyMatchesPurchaseIntent(rawPayload: Record<string, unknown>): boolean {
+  const raw = whatsappInteractiveReplyTitle(rawPayload);
+  if (!raw) return false;
+  const n = raw
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!n) return false;
+  return INTERACTIVE_PURCHASE_INTENT_PHRASES.some((p) => n === p || n.includes(p));
 }
 
 export function createFlowEngine(ctx: FlowEngineContext) {
@@ -1333,6 +1377,61 @@ export function createFlowEngine(ctx: FlowEngineContext) {
   }
 
   /**
+   * Cierra la sesión de flujo cuando se acaba de enviar el nodo FINAL de compra de sorteo
+   * (p. ej. `compra_realizada`, sin next_node_code). Sin esto, la conversación queda "pegada"
+   * en el nodo final con sesión `active`, y un mensaje/botón posterior del cliente recurrente
+   * reejecuta/reenvía la confirmación o ticket de la orden vieja (bug auditado).
+   * Deja el puntero en null para que el próximo mensaje entre como compra nueva (reinicio limpio
+   * vía webhook), sin tocar numero_orden/cupones/ticket previos. No reenvía nada por sí mismo.
+   */
+  async function maybeCompleteSorteoFinalSession(
+    state: ConversationFlowState,
+    node: FlowNode
+  ): Promise<void> {
+    const isFinal =
+      !node.next_node_code?.trim() &&
+      isSorteoFinalTicketNode(node.node_code, { nodeMessageTemplate: node.message_text });
+    if (!isFinal) return;
+    try {
+      await markConversationActiveSessionsEnded(
+        supabase,
+        state.empresa_id,
+        state.id,
+        "completed",
+        `final_node:${node.node_code}`
+      );
+      await supabase
+        .from("chat_conversations")
+        .update({
+          active_flow_session_id: null,
+          flow_current_node: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", state.id)
+        .eq("empresa_id", state.empresa_id);
+      await insertFlowEvent({
+        empresaId: state.empresa_id,
+        conversationId: state.id,
+        flowCode: state.flow_code,
+        nodeCode: node.node_code,
+        flowSessionId: state.active_flow_session_id,
+        eventType: "flow_session_completed_final_node",
+        payload: { node_code: node.node_code, reason: "sorteo_final_node_sent" },
+      });
+      console.info("[flow-engine] sorteo_final_session_completed", {
+        conversationId: state.id,
+        nodeCode: node.node_code,
+        prevSessionId: state.active_flow_session_id ?? null,
+      });
+    } catch (e) {
+      console.warn(
+        "[flow-engine] maybeCompleteSorteoFinalSession_failed",
+        e instanceof Error ? e.message : String(e)
+      );
+    }
+  }
+
+  /**
    * Tras enviar un nodo saliente: si hay siguiente paso y el nodo no espera input del cliente,
    * avanza la conversación y ejecuta sendCurrentFlowNode recursivamente (máx. __autoHop).
    * Importante: la rama legacy (sin bloques) debe usar la misma lógica que la rama con bloques.
@@ -1821,6 +1920,7 @@ export function createFlowEngine(ctx: FlowEngineContext) {
         params.mergeFlowVars
       );
       if (chainedLegacy) return chainedLegacy;
+      await maybeCompleteSorteoFinalSession(state, node);
       return { ok: true, nodeCode: node.node_code };
     }
 
@@ -2006,6 +2106,7 @@ export function createFlowEngine(ctx: FlowEngineContext) {
       params.mergeFlowVars
     );
     if (chained) return chained;
+    await maybeCompleteSorteoFinalSession(state, node);
     return { ok: true, nodeCode: node.node_code };
   }
 
@@ -2152,17 +2253,27 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     const options = await getNodeOptions(currentNode.id);
     const selected = resolveSelectedFlowOption(options, params.metaButtonId, params.rawPayload);
     if (!selected) {
+      const purchaseIntent = interactiveReplyMatchesPurchaseIntent(params.rawPayload);
       await insertFlowEvent({
         empresaId: state.empresa_id,
         conversationId: state.id,
         flowCode: state.flow_code,
         nodeCode: currentNode.node_code,
         flowSessionId: state.active_flow_session_id,
-        eventType: "invalid_button",
+        eventType: purchaseIntent ? "invalid_button_purchase_intent" : "invalid_button",
         metaButtonId: params.metaButtonId,
-        payload: { reason: "option_not_found_in_node", raw: params.rawPayload },
+        payload: {
+          reason: "option_not_found_in_node",
+          purchase_intent: purchaseIntent,
+          raw: params.rawPayload,
+        },
       });
-      return { ok: true, status: "invalid_button" };
+      // Botón de "comprar de nuevo" que NO es opción del nodo actual (p. ej. en compra_realizada):
+      // señalamos al webhook que inicie una compra nueva en vez de quedar como botón inválido.
+      return {
+        ok: true,
+        status: purchaseIntent ? "invalid_button_restart_intent" : "invalid_button",
+      };
     }
 
     if (currentNode.node_type === "buttons" && buttonQuickReplyGroupsEnabled(options)) {

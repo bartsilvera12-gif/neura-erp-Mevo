@@ -1640,6 +1640,44 @@ export async function processInboundWebhookValue(
               `Flow interactive: ${interactiveResult.error ?? interactiveResult.status}`
             );
           }
+          // FIX: botón de "comprar de nuevo" que no es opción del nodo actual (p. ej. en
+          // compra_realizada). En vez de quedar como invalid_button, reiniciamos una compra nueva.
+          if (
+            interactiveResult.status === "invalid_button_restart_intent" &&
+            !restartedThisMessage &&
+            !convHuman &&
+            convFlowStatus !== "human"
+          ) {
+            console.info(CONV_LOG, "interactive_purchase_intent_restart", {
+              conversationId,
+              title: content.trim().slice(0, 40),
+            });
+            const rrInteractive = await restartWhatsappConversationToFlowStart(
+              supabase,
+              empresaId,
+              conversationId,
+              {
+                preferFlowCode: convFlow,
+                trigger: "interactive_purchase_intent",
+                preserveReferralFromPreviousSession: true,
+                intentAudit: { matched_keyword: content.trim().slice(0, 60) || "interactive" },
+              }
+            );
+            if (rrInteractive.restarted) {
+              restartedThisMessage = true;
+              convFlow = rrInteractive.flow_code;
+              convNode = rrInteractive.flow_current_node;
+              const presentAfterInt = await flowEngine.ensureCurrentNodePresentedAfterInbound({
+                conversationId,
+                empresaId,
+              });
+              console.info(CONV_LOG, "interactive_purchase_intent_restart_presented", {
+                conversationId,
+                ok: presentAfterInt.ok,
+                status: presentAfterInt.status,
+              });
+            }
+          }
           presentResult = {
             ok: interactiveResult.ok,
             status: interactiveResult.status,
