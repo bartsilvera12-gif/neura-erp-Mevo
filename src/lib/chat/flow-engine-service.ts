@@ -401,17 +401,33 @@ function whatsappInteractiveReplyTitle(rawPayload: Record<string, unknown>): str
   return (intr?.button_reply?.title ?? intr?.list_reply?.title ?? "").trim();
 }
 
-/** Frases de intención de compra (ya normalizadas: minúsculas, sin acentos). */
+/**
+ * Frases de intención de compra (ya normalizadas: minúsculas, sin acentos).
+ * Solo se evalúan cuando el botón NO matchea opción del nodo actual (caso invalid_button),
+ * así nunca interfieren con la selección de combos. "compra" cubre compra/comprar y variantes.
+ */
 const INTERACTIVE_PURCHASE_INTENT_PHRASES = [
-  "comprar mas",
-  "comprar otra vez",
-  "quiero comprar",
+  "compra",
+  "compra mas",
   "comprar",
-  "mas numeros",
-  "quiero mas",
+  "comprar mas",
+  "quiero comprar",
+  "quiero comprar mas",
+  "quisiera comprar",
+  "volver a comprar",
+  "comprar otra vez",
+  "quiero otro",
+  "quiero otra",
   "otra vez",
-  "quiero participar",
+  "otro boleto",
+  "otra boleta",
+  "boleto",
+  "boleta",
+  "boletos",
+  "boletas",
   "participar",
+  "quiero participar",
+  "mas numeros",
   "mas boletas",
 ];
 

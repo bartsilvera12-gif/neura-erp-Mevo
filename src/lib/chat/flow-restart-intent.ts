@@ -27,18 +27,34 @@ export type FlowRestartIntentConfig = {
 };
 
 const DEFAULT_SOFT_KEYWORDS = [
+  // Intención de compra. La coincidencia es por substring normalizado (sin acentos, minúsculas),
+  // así "compra" cubre "compra", "compra mas", "comprar", "comprar más", "quiero comprar",
+  // "quisiera comprar más", "volver a comprar", etc. Se listan formas explícitas por claridad.
+  "compra",
+  "compra mas",
+  "comprar",
+  "comprar mas",
+  "quiero comprar",
+  "quiero comprar mas",
+  "quisiera comprar",
+  "volver a comprar",
+  "comprar otra vez",
+  "quiero otro",
+  "quiero otra",
+  "quiero otra vez",
+  "otra vez",
+  "otro boleto",
+  "otra boleta",
   "boletos",
   "boleto",
-  "quiero comprar",
-  "comprar",
+  "boletas",
+  "boleta",
   "participar",
   "quiero participar",
   "más números",
   "mas numeros",
   "quiero números",
   "quiero numeros",
-  "otra vez",
-  "comprar otra vez",
 ] as const;
 
 /** Por defecto también fuerzan reinicio en pasos sensibles (cédula/comprobante). */
