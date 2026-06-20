@@ -62,6 +62,7 @@ import {
 import { readSorteoCantidadNumericFromMap } from "@/lib/sorteos/sorteo-cantidad-fields";
 import { SORTEO_TICKET_DEFAULT_STUB, type SorteoTicketDeliveryMode } from "@/lib/sorteos/sorteo-ticket-types";
 import { isSorteoFinalTicketNode } from "@/lib/chat/sorteo-final-ticket-node";
+import { matchesPurchaseIntent } from "@/lib/chat/purchase-intent";
 import {
   canCloseSorteoPurchase,
   getFlowClosePurchasePolicy,
@@ -402,52 +403,12 @@ function whatsappInteractiveReplyTitle(rawPayload: Record<string, unknown>): str
 }
 
 /**
- * Frases de intención de compra (ya normalizadas: minúsculas, sin acentos).
- * Solo se evalúan cuando el botón NO matchea opción del nodo actual (caso invalid_button),
- * así nunca interfieren con la selección de combos. "compra" cubre compra/comprar y variantes.
- */
-const INTERACTIVE_PURCHASE_INTENT_PHRASES = [
-  "compra",
-  "compra mas",
-  "comprar",
-  "comprar mas",
-  "quiero comprar",
-  "quiero comprar mas",
-  "quisiera comprar",
-  "volver a comprar",
-  "comprar otra vez",
-  "quiero otro",
-  "quiero otra",
-  "otra vez",
-  "otro boleto",
-  "otra boleta",
-  "boleto",
-  "boleta",
-  "boletos",
-  "boletas",
-  "participar",
-  "quiero participar",
-  "mas numeros",
-  "mas boletas",
-];
-
-/**
  * ¿El título de un botón interactivo expresa intención de comprar de nuevo?
- * Solo se evalúa cuando el botón NO matchea una opción del nodo actual (caso invalid_button),
- * así nunca interfiere con la selección legítima de combos.
+ * Usa el matcher compartido (raíces + typos). Solo se evalúa cuando el botón NO matchea una
+ * opción del nodo actual (caso invalid_button), así nunca interfiere con la selección de combos.
  */
 function interactiveReplyMatchesPurchaseIntent(rawPayload: Record<string, unknown>): boolean {
-  const raw = whatsappInteractiveReplyTitle(rawPayload);
-  if (!raw) return false;
-  const n = raw
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!n) return false;
-  return INTERACTIVE_PURCHASE_INTENT_PHRASES.some((p) => n === p || n.includes(p));
+  return matchesPurchaseIntent(whatsappInteractiveReplyTitle(rawPayload));
 }
 
 export function createFlowEngine(ctx: FlowEngineContext) {

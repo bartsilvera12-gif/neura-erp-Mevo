@@ -5,6 +5,7 @@ import {
   restartWhatsappConversationToFlowStart,
 } from "@/lib/chat/resolve-whatsapp-active-flow";
 import { ensureCurrentNodePresentedAfterInbound } from "@/lib/chat/flow-engine-service";
+import { matchesPurchaseIntent } from "@/lib/chat/purchase-intent";
 
 const LOG = "[purchase-intent-restart]" as const;
 
@@ -256,7 +257,11 @@ export async function maybeRestartForPurchaseIntent(
   }
 
   const strongMatch = matchRestartPhraseList(content, cfg.restart_strong_keywords);
-  const softMatch = matchRestartPhraseList(content, cfg.restart_keywords);
+  // Soft: keywords explícitas (config) + detección robusta por raíces/typos (compra*, bolet*, …).
+  // matchesPurchaseIntent es señal soft → sigue respetando el guard de pasos de captura sensibles.
+  const softMatch =
+    matchRestartPhraseList(content, cfg.restart_keywords) ??
+    (matchesPurchaseIntent(content) ? "intencion_compra" : null);
   const matched = strongMatch ?? softMatch;
   if (!matched) return noop("no_keyword_match");
 
