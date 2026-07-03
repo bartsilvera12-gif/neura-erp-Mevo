@@ -1,16 +1,17 @@
 import SorteosListClient from "./SorteosListClient";
-import { getSorteosVentasKpis } from "@/lib/sorteos/ventas-kpis";
+import { getSorteosVentasKpis, type SorteosVentasKpis } from "@/lib/sorteos/ventas-kpis";
 
 /** KPIs dependen de sesión y ventana calendario Paraguay; evitar cache estático de respuestas en 0. */
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function SorteosPage() {
-  let ventasKpis = {
+  let ventasKpis: SorteosVentasKpis = {
     boletosHoy: 0,
-    boletosMes: 0,
+    boletosSorteo: 0,
     montoHoy: 0,
-    montoMes: 0,
+    montoSorteo: 0,
+    sorteoNombre: null,
   };
   try {
     ventasKpis = await getSorteosVentasKpis();
