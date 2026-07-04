@@ -50,6 +50,19 @@ export function cleanTelefono(value: string): string {
 }
 
 /**
+ * Número nacional significativo PY: sólo dígitos, sin código país `595` ni `0` de troncal.
+ * Permite matchear el mismo número tipeado en local (`0992419766`), sin prefijo (`992419766`)
+ * o internacional (`595992419766`) — todos colapsan a `992419766`. Útil para buscar contactos
+ * por teléfono cuando el guardado está en formato internacional.
+ */
+export function toNationalPhoneDigits(value: string): string {
+  let d = extractDigits(value);
+  if (d.startsWith("595")) d = d.slice(3);
+  d = d.replace(/^0+/, "");
+  return d;
+}
+
+/**
  * Valida formato Paraguay aceptando:
  *   - Local: 10 dígitos, empieza con "09"
  *   - Internacional: 12 dígitos, empieza con "5959" (código país + móvil)

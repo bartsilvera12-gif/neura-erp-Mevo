@@ -452,8 +452,12 @@ export function ConversacionesClient({
       /* ignore */
     }
   }, [headerCollapsed]);
-  /** Filtro local del listado (nombre o teléfono); no altera la carga desde servidor. */
+  /** Texto del buscador (inmediato). Filtra la página cargada y, con ≥3, dispara búsqueda server-side. */
   const [listSearch, setListSearch] = useState("");
+  /** Término debounced que efectivamente se manda al servidor (vacío si <3 chars). */
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  /** Búsqueda server-side en vuelo (para mostrar "Buscando…" en vez de "sin resultados"). */
+  const [searchLoading, setSearchLoading] = useState(false);
   const [finalizeOpen, setFinalizeOpen] = useState(false);
   const [finalizeLoading, setFinalizeLoading] = useState(false);
   const [opPresenceLoaded, setOpPresenceLoaded] = useState(
@@ -491,6 +495,12 @@ export function ConversacionesClient({
   /** Lectura siempre actual para sondeos silenciosos / realtime (evita filtros obsoletos en closure). */
   const searchParamsRef = useRef(searchParams);
   searchParamsRef.current = searchParams;
+
+  /** Búsqueda debounced siempre actual, para que los refetch silenciosos la respeten. */
+  const debouncedSearchRef = useRef("");
+  debouncedSearchRef.current = debouncedSearch;
+  /** Evita un refetch redundante en el montaje (el efecto de carga inicial ya corre). */
+  const didInitSearchRef = useRef(false);
 
   /** Optimista: `router.replace` actualiza la URL un tick después; sin esto el select vuelve al valor anterior. */
   const [pendingCanal, setPendingCanal] = useState<string | null>(null);
@@ -549,7 +559,9 @@ export function ConversacionesClient({
     async (opts?: { silent?: boolean }) => {
       const silent = opts?.silent ?? false;
       const sp = new URLSearchParams(searchParamsRef.current?.toString() ?? "");
-      const filters = parseInboxFilters(sp);
+      const baseFilters = parseInboxFilters(sp);
+      const searchTerm = debouncedSearchRef.current.trim();
+      const filters = searchTerm ? { ...(baseFilters ?? {}), search: searchTerm } : baseFilters;
       const previousCount = conversationsRef.current.length;
       if (silent) {
         chatListUiLog("refetch-start", {
@@ -577,8 +589,11 @@ export function ConversacionesClient({
             filters: filters ?? null,
           });
         }
+        /** Con búsqueda activa, 0 resultados es válido (no preservar la lista previa). */
+        const isSearchingNow = debouncedSearchRef.current.trim().length >= 3;
         const preserveSilentEmpty =
           silent &&
+          !isSearchingNow &&
           rows.length === 0 &&
           previousCount > 0 &&
           (baseRowCount === 0 || Boolean(transientListError));
@@ -816,6 +831,38 @@ export function ConversacionesClient({
     setLoadingList(true);
     void loadConversations();
   }, [loadConversations, inboxFilterKey]);
+
+  /** Debounce del buscador: sólo es "server-worthy" a partir de 3 caracteres. */
+  useEffect(() => {
+    const q = listSearch.trim();
+    const eff = q.length >= 3 ? q : "";
+    if (eff === debouncedSearch) return;
+    const t = setTimeout(() => setDebouncedSearch(eff), 350);
+    return () => clearTimeout(t);
+  }, [listSearch, debouncedSearch]);
+
+  /**
+   * Al cambiar la búsqueda debounced, recargar desde el servidor: el fetch resuelve los contactos
+   * que matchean y trae SOLO esas conversaciones, sin importar el tope ~1000 del listado.
+   */
+  useEffect(() => {
+    if (!didInitSearchRef.current) {
+      didInitSearchRef.current = true;
+      return;
+    }
+    let cancelled = false;
+    setSearchLoading(true);
+    void (async () => {
+      try {
+        await loadConversationsRef.current?.({ silent: true });
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearch]);
 
   useEffect(() => {
     listChatQueues()
@@ -2519,7 +2566,12 @@ export function ConversacionesClient({
               </div>
             ) : visibleConversations.length === 0 ? (
               <div className="p-4 text-xs text-slate-500 text-center space-y-1">
-                <p>Ningún chat coincide con la búsqueda</p>
+                {searchLoading ||
+                (listSearch.trim().length >= 3 && listSearch.trim() !== debouncedSearch) ? (
+                  <p className="animate-pulse">Buscando en todas las conversaciones…</p>
+                ) : (
+                  <p>Ningún chat coincide con la búsqueda</p>
+                )}
               </div>
             ) : (
               visibleConversations.map((c) => {

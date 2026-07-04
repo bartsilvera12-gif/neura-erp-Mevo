@@ -46,6 +46,7 @@ import {
   quoteSchemaTable,
 } from "@/lib/supabase/chat-pg-pool";
 import { isLikelyUnexposedTenantChatSchema } from "@/lib/supabase/chat-data-schema";
+import { toNationalPhoneDigits } from "@/lib/telefono";
 import {
   pgDeleteChatChannel,
   pgInsertChatChannelMetaWhatsapp,
@@ -93,6 +94,13 @@ export type ChatInboxFilters = {
   priority?: string | null;
   /** Filtro opcional por `chat_conversations.channel_id` (UUID). */
   channel_id?: string | null;
+  /**
+   * Búsqueda server-side por teléfono/nombre del contacto. Sin esto el buscador sólo filtra la
+   * página cargada (tope PostgREST ~1000), así que conversaciones fuera de esa ventana no se
+   * encuentran. Con `search`, el fetch resuelve los `contact_id` que matchean y trae SOLO esas
+   * conversaciones, sin importar cuán viejas sean.
+   */
+  search?: string | null;
 };
 
 export type InboxConversation = {
@@ -286,6 +294,63 @@ async function logBotTabClassificationSamplePostgrest(
   }
 }
 
+/** UUID imposible para forzar 0 resultados cuando la búsqueda no matcheó ningún contacto. */
+const IMPOSSIBLE_CONTACT_ID = "00000000-0000-0000-0000-000000000000";
+const CONTACT_SEARCH_ID_LIMIT = 500;
+
+/**
+ * Resuelve los `contact_id` cuyo teléfono o nombre matchean la búsqueda (path PostgREST).
+ * - Teléfono: compara por número nacional significativo (sin `595` ni `0`) como substring, así
+ *   encuentra el contacto tenga el guardado en formato local o internacional.
+ * - Nombre: `ilike` cuando el término contiene letras.
+ * Devuelve `[]` si no matchea nada (el llamador lo trata como "sin resultados").
+ */
+async function resolveContactIdsForSearchPostgrest(
+  supabase: AppSupabaseClient,
+  empresaId: string,
+  rawTerm: string
+): Promise<string[]> {
+  const term = rawTerm.trim();
+  const nat = toNationalPhoneDigits(term);
+  const ids = new Set<string>();
+
+  if (nat.length >= 3) {
+    const { data, error } = await supabase
+      .from("chat_contacts")
+      .select("id")
+      .eq("empresa_id", empresaId)
+      .ilike("phone_number", `%${nat}%`)
+      .limit(CONTACT_SEARCH_ID_LIMIT);
+    if (error) {
+      console.warn("[fetchChatConversations] búsqueda contactos por teléfono:", error.message);
+    } else {
+      for (const r of data ?? []) {
+        const id = String((r as { id?: string }).id ?? "").trim();
+        if (id) ids.add(id);
+      }
+    }
+  }
+
+  if (term.length >= 3 && /[a-zA-Z]/.test(term)) {
+    const { data, error } = await supabase
+      .from("chat_contacts")
+      .select("id")
+      .eq("empresa_id", empresaId)
+      .ilike("name", `%${term}%`)
+      .limit(CONTACT_SEARCH_ID_LIMIT);
+    if (error) {
+      console.warn("[fetchChatConversations] búsqueda contactos por nombre:", error.message);
+    } else {
+      for (const r of data ?? []) {
+        const id = String((r as { id?: string }).id ?? "").trim();
+        if (id) ids.add(id);
+      }
+    }
+  }
+
+  return [...ids];
+}
+
 async function fetchChatConversationsUnsafe(
   vista: ConversacionesVista = "inbox",
   filters?: ChatInboxFilters
@@ -366,6 +431,18 @@ async function fetchChatConversationsUnsafe(
   }
 
   /**
+   * Búsqueda server-side: si hay término (≥3), resolvemos los contactos que matchean y luego
+   * filtramos las conversaciones por esos `contact_id`. Esto evita el tope ~1000 del listado
+   * (sólo trae los pocos matches). Si no matchea ningún contacto, forzamos 0 resultados.
+   */
+  const searchTerm = (filters?.search ?? "").trim();
+  let searchContactIds: string[] | null = null;
+  if (searchTerm.length >= 3) {
+    searchContactIds = await resolveContactIdsForSearchPostgrest(supabase, empresa_id, searchTerm);
+    if (searchContactIds.length === 0) searchContactIds = [IMPOSSIBLE_CONTACT_ID];
+  }
+
+  /**
    * Sin embeds desde `chat_conversations`: en esquemas tenant PostgREST suele no tener en caché
    * las FKs hacia `chat_channels` / `chat_queues` / `chat_agents` y falla el select anidado.
    */
@@ -431,6 +508,11 @@ async function fetchChatConversationsUnsafe(
       qb = qb.in("status", ["open", "pending"]);
     } else if (vista === "historial") {
       qb = qb.eq("status", "closed");
+    }
+
+    /** Búsqueda server-side por contacto: restringe a las conversaciones de los contactos que matchean. */
+    if (searchContactIds) {
+      qb = qb.in("contact_id", searchContactIds);
     }
 
     const scope = await getOmnicanalScope(supabase, empresa_id, usuario_id, {
