@@ -1625,6 +1625,19 @@ export function ConversacionesClient({
     const q = listSearch.trim().toLowerCase();
     if (!q) return conversations;
     const qDigits = q.replace(/\D/g, "");
+    /**
+     * Normaliza a "número nacional significativo" PY: sin código país `595` ni `0` de troncal.
+     * Así `0992419766` (local), `992419766` y `595992419766` (internacional) matchean el mismo
+     * contacto. Los números se guardan en formato internacional (595…), pero el usuario suele
+     * tipear el local con `0` inicial, que rompía el match por substring.
+     */
+    const toNat = (d: string) => {
+      let x = d;
+      if (x.startsWith("595")) x = x.slice(3);
+      x = x.replace(/^0+/, "");
+      return x;
+    };
+    const qNat = toNat(qDigits);
     return conversations.filter((c) => {
       const name = (c.contact.name || "").toLowerCase();
       const phone = String(c.contact.phone_number || "");
@@ -1632,6 +1645,7 @@ export function ConversacionesClient({
       if (name.includes(q)) return true;
       if (phone.toLowerCase().includes(q)) return true;
       if (qDigits.length > 0 && phoneDigits.includes(qDigits)) return true;
+      if (qNat.length > 0 && toNat(phoneDigits).includes(qNat)) return true;
       return false;
     });
   }, [conversations, listSearch]);
