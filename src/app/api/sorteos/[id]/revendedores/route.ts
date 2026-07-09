@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getChatServiceClientForEmpresa } from "@/app/api/chat/_chat-service-client";
-import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { successResponse, errorResponse } from "@/lib/api/response";
-import { API_ERRORS } from "@/lib/api/errors";
+import { requireRevendedoresAdmin } from "@/lib/sorteos/revendedores-admin-guard";
 
 /**
  * GET /api/sorteos/:id/revendedores — lista revendedores del sorteo (PG shim si tenant no expuesto).
@@ -12,11 +11,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await getTenantSupabaseFromAuth(request);
-    if (!ctx) {
-      return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    const guard = await requireRevendedoresAdmin(request);
+    if (!guard.ok) {
+      return NextResponse.json(errorResponse(guard.message), { status: guard.status });
     }
-    const empresaId = ctx.auth.empresa_id;
+    const empresaId = guard.empresaId;
     const { id: sorteoId } = await params;
 
     const sb = await getChatServiceClientForEmpresa(empresaId);
@@ -45,11 +44,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await getTenantSupabaseFromAuth(request);
-    if (!ctx) {
-      return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    const guard = await requireRevendedoresAdmin(request);
+    if (!guard.ok) {
+      return NextResponse.json(errorResponse(guard.message), { status: guard.status });
     }
-    const empresaId = ctx.auth.empresa_id;
+    const empresaId = guard.empresaId;
     const { id: sorteoId } = await params;
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;

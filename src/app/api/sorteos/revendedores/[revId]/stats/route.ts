@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getChatServiceClientForEmpresa } from "@/app/api/chat/_chat-service-client";
-import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { successResponse, errorResponse } from "@/lib/api/response";
-import { API_ERRORS } from "@/lib/api/errors";
+import { requireRevendedoresAdmin } from "@/lib/sorteos/revendedores-admin-guard";
 
 export type RevendedorStatsPayload = {
   clicks: number;
@@ -21,11 +20,11 @@ export async function GET(
   { params }: { params: Promise<{ revId: string }> }
 ) {
   try {
-    const ctx = await getTenantSupabaseFromAuth(request);
-    if (!ctx) {
-      return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    const guard = await requireRevendedoresAdmin(request);
+    if (!guard.ok) {
+      return NextResponse.json(errorResponse(guard.message), { status: guard.status });
     }
-    const empresaId = ctx.auth.empresa_id;
+    const empresaId = guard.empresaId;
     const { revId } = await params;
     const revendedorId = revId.trim();
     if (!revendedorId) {
