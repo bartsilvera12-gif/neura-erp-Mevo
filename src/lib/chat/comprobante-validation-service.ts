@@ -181,17 +181,25 @@ function worstMissing(a: OnMissingBehavior, b: OnMissingBehavior): OnMissingBeha
 async function existsHashDuplicate(
   supabase: AppSupabaseClient,
   empresaId: string,
-  hash: string
+  hash: string,
+  sameFlowSessionId: string
 ): Promise<boolean> {
   if (!hash.trim()) return false;
-  const { data, error } = await supabase
+  let q = supabase
     .from("chat_comprobante_validaciones")
     .select("id")
     .eq("empresa_id", empresaId)
     .eq("comprobante_hash", hash)
-    .in("estado_validacion", ESTADOS_HASH_BLOQUEA_REUSO)
-    .limit(1)
-    .maybeSingle();
+    .in("estado_validacion", ESTADOS_HASH_BLOQUEA_REUSO);
+  /**
+   * Excluir la MISMA compra/sesión: reenviar o reprocesar el mismo comprobante dentro del mismo
+   * flujo NO es una reutilización — el bloqueo por hash sólo debe aplicar al mismo comprobante en
+   * OTRA compra. Espeja `existsOcrRefDuplicate`. Sin esto, el doble procesamiento (retry del
+   * proveedor) o el reenvío del cliente en la misma compra se autodetecta como "compra anterior".
+   */
+  const sid = (sameFlowSessionId ?? "").trim();
+  if (sid) q = q.neq("flow_session_id", sid);
+  const { data, error } = await q.limit(1).maybeSingle();
   if (error) return false;
   return Boolean(data?.id);
 }
@@ -388,7 +396,7 @@ export async function runComprobanteValidationPipeline(ctx: PipelineCtx): Promis
 
   // --- Hash duplicado ---
   if (settings.deteccion_duplicados_hash && settings.bloquear_por_hash_duplicado) {
-    const dup = await existsHashDuplicate(supabase, ctx.empresaId, hash);
+    const dup = await existsHashDuplicate(supabase, ctx.empresaId, hash, sid);
     if (dup) {
       console.info("[sorteo-comprobante][duplicate-check]", {
         empresa_id: ctx.empresaId,
