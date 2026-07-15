@@ -42,8 +42,29 @@ function isOmnicanalDashboardSlug(slug: string): boolean {
   return (OMNICANAL_DASHBOARD_SLUGS as readonly string[]).includes(slug);
 }
 
+/**
+ * Módulos ocultos de la vista del cliente en este deployment (Mevo).
+ *
+ * Se ocultan del sidebar y se bloquea el acceso directo por URL para todos los
+ * roles NO super_admin. El super_admin conserva acceso total: tanto el sidebar
+ * (`canAccessSidebarSlug`) como el guard de ruta (`AuthGuard`) hacen bypass de
+ * super_admin ANTES de consultar `isModuleSlugGranted`, por lo que esta lista
+ * nunca lo afecta. Es un ocultamiento de UI/routing, no revoca los datos.
+ */
+export const CLIENT_HIDDEN_MODULE_SLUGS: ReadonlySet<string> = new Set([
+  "monitoreo",
+  "conversaciones-finalizadas",
+  "usuarios",
+  "marketing_ops",
+  "marketing",
+  "proyectos",
+  "historial-omnicanal",
+]);
+
 /** Slugs otorgados explícitamente o por alias (p. ej. `clientes` incluye gestión de cartera). */
 export function isModuleSlugGranted(routeSlug: string, grantedSlugs: Set<string>): boolean {
+  // Ocultos para el cliente (no super_admin). Los callers ya exoneran super_admin.
+  if (CLIENT_HIDDEN_MODULE_SLUGS.has(routeSlug)) return false;
   if (grantedSlugs.has(routeSlug)) return true;
   // Paquete legacy: un solo permiso para todo el stack dashboard omnicanal.
   if (grantedSlugs.has("omnicanal") && isOmnicanalDashboardSlug(routeSlug)) return true;
