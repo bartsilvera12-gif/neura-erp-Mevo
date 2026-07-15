@@ -6,6 +6,7 @@ import {
   type DirectPgSorteoOk,
 } from "@/lib/sorteos/sorteo-order-direct-pg";
 import { getChatPostgresConnectionString } from "@/lib/supabase/chat-pg-pool";
+import { registrarSorteoInscripcionSinComprobanteViaDirectPostgres } from "@/lib/sorteos/sorteo-registro-sin-comprobante-pg";
 import { flowTrace, summarizeFlowDataForTrace } from "@/lib/chat/flow-trace-log";
 import {
   SORTEO_COMPROBANTE_ESTADO_VALIDACION_FIELD,
@@ -821,6 +822,135 @@ export async function mergeComprobanteFromValidationRowIntoFlowData(
 }
 
 /**
+ * Modo pre-registro / giveaway: lee `chat_flows.flow_config.sorteo_sin_comprobante`.
+ * Cuando está activo, la inscripción se cierra SIN exigir comprobante ni monto.
+ */
+export async function isFlowSorteoSinComprobante(
+  supabase: AppSupabaseClient,
+  empresaId: string,
+  flowCode: string
+): Promise<boolean> {
+  const fc = flowCode.trim();
+  if (!fc) return false;
+  const { data, error } = await supabase
+    .from("chat_flows")
+    .select("flow_config, updated_at")
+    .eq("empresa_id", empresaId)
+    .eq("flow_code", fc)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error || !data?.length) return false;
+  const cfg = (data[0] as { flow_config?: unknown }).flow_config as
+    | { sorteo_sin_comprobante?: unknown }
+    | null
+    | undefined;
+  return cfg?.sorteo_sin_comprobante === true;
+}
+
+/**
+ * Inscribe al participante SIN comprobante (1 entrada + 1 cupón, monto 0, estado confirmado).
+ * Devuelve el mismo shape de éxito que `ensureSorteoOrderFromChat` para que los callers
+ * (botón / lazy / imagen) escriban el contexto y el mensaje final igual que en compra normal.
+ */
+async function finalizeSorteoInscripcionSinComprobante(
+  supabase: AppSupabaseClient,
+  input: {
+    empresaId: string;
+    conversationId: string;
+    flowCode: string;
+    flowSessionId: string;
+    whatsappNumero: string;
+    flowData: Record<string, string>;
+  }
+): Promise<EnsureSorteoOrderFromChatResult> {
+  const flowCode = input.flowCode.trim();
+  const sorteoId = await getSorteoIdForChatFlow(supabase, input.empresaId, flowCode);
+  if (!sorteoId) {
+    return { ok: true, skipped: true, reason: "flow_sin_sorteo_id" };
+  }
+
+  // El parser exige una cantidad; en pre-registro es siempre 1 (un número por inscripto).
+  const flowData = prepareFlowDataForSorteoOrder(input.flowData);
+  const participant = parseSorteoParticipantFromFlowData({ ...flowData, cantidad: "1" });
+  if (!participant) {
+    return { ok: true, skipped: true, reason: "datos_flujo_incompletos" };
+  }
+
+  if (!getChatPostgresConnectionString()) {
+    return {
+      ok: false,
+      message:
+        "No hay conexión directa a la base de datos para registrar la inscripción. Contactá soporte.",
+    };
+  }
+
+  const idempotencyKey = buildSorteoIdempotencyKey(
+    input.conversationId,
+    flowCode,
+    `sin_comprobante:${input.flowSessionId?.trim() || "s"}`
+  );
+  const dataSchema = await fetchDataSchemaForEmpresaId(input.empresaId);
+
+  const directOut = await registrarSorteoInscripcionSinComprobanteViaDirectPostgres({
+    schema: dataSchema,
+    empresaId: input.empresaId,
+    sorteoId,
+    conversationId: input.conversationId,
+    flowCode,
+    idempotencyKey,
+    whatsappNumero: input.whatsappNumero,
+    nombreCompleto: participant.nombre_completo,
+    cedula: participant.cedula || "",
+    ciudad: participant.ciudad || "",
+    cantidadBoletos: 1,
+  });
+  if (!directOut.ok) {
+    return { ok: false, message: directOut.message };
+  }
+
+  const dbForTenantTables =
+    dataSchema === SUPABASE_APP_SCHEMA ? supabase : createServiceRoleClientWithDbSchema(dataSchema);
+  const { data: sorteoRow } = await dbForTenantTables
+    .from("sorteos")
+    .select("nombre")
+    .eq("id", sorteoId)
+    .maybeSingle();
+  let sorteoNombre = String((sorteoRow as { nombre?: string } | null)?.nombre ?? "").trim();
+  if (!sorteoNombre) {
+    const pgNom = await fetchSorteoRowTicketFieldsFromPg(dataSchema, sorteoId);
+    sorteoNombre = String(pgNom?.nombre ?? "").trim();
+  }
+
+  flowTrace("sorteo_order_created", {
+    conversation_id: input.conversationId,
+    empresa_id: input.empresaId,
+    flow_code: flowCode,
+    flow_session_id_context: input.flowSessionId?.trim() ?? null,
+    sorteo_id: sorteoId,
+    entrada_id: directOut.entradaId,
+    numero_orden: directOut.numeroOrden,
+    cantidad_boletos: directOut.cantidadBoletos,
+    idempotent: directOut.idempotent,
+    event: "inscripcion_sorteo_sin_comprobante",
+  });
+
+  return {
+    ok: true,
+    skipped: false,
+    idempotent: directOut.idempotent,
+    entradaId: directOut.entradaId,
+    numeroOrden: directOut.numeroOrden,
+    cupones: directOut.cupones,
+    sorteoId,
+    sorteoNombre,
+    cantidadBoletos: directOut.cantidadBoletos,
+    montoTotal: directOut.montoTotal,
+    promoNombre: directOut.promoNombre,
+    precioFuente: directOut.precioFuente,
+  };
+}
+
+/**
  * Cierra compra sorteo + cupones (RPC idempotente) cuando el cliente ya confirmó y existen datos + comprobante en sesión.
  */
 export async function finalizeSorteoOrderFromConfirmedFlowData(
@@ -834,6 +964,11 @@ export async function finalizeSorteoOrderFromConfirmedFlowData(
     flowData: Record<string, string>;
   }
 ): Promise<EnsureSorteoOrderFromChatResult> {
+  // Pre-registro / giveaway: inscribe sin comprobante ni monto (misma salida que compra normal).
+  if (await isFlowSorteoSinComprobante(supabase, input.empresaId, input.flowCode)) {
+    return finalizeSorteoInscripcionSinComprobante(supabase, input);
+  }
+
   const mergedIn = await mergeComprobanteFromValidationRowIntoFlowData(
     supabase,
     input.empresaId,
