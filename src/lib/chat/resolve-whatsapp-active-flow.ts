@@ -93,7 +93,11 @@ export async function listActiveWhatsappFlowsForEmpresa(
 }
 
 /**
- * Primer nodo activo del flujo (sort_order, luego created_at). Sin filas → null.
+ * Primer nodo activo del flujo: la RAÍZ del grafo (nodo sin referencias entrantes
+ * desde `next_node_code` de nodos ni desde opciones) — mismo criterio que el editor
+ * muestra como "Nodo inicial o sin referencias previas". `sort_order`/`created_at`
+ * solo desempatan entre varias raíces; si no hay raíz (ciclo), cae al orden visual
+ * (comportamiento anterior). Sin filas → null.
  */
 export async function getFirstActiveNodeCodeForFlow(
   supabase: SupabaseAdmin,
@@ -102,20 +106,51 @@ export async function getFirstActiveNodeCodeForFlow(
 ): Promise<string | null> {
   const { data, error } = await supabase
     .from("chat_flow_nodes")
-    .select("node_code, sort_order, created_at")
+    .select("id, node_code, sort_order, created_at, next_node_code")
     .eq("empresa_id", empresaId)
     .eq("flow_code", flowCode)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
-    .order("created_at", { ascending: true })
-    .limit(1);
+    .order("created_at", { ascending: true });
 
   if (error) {
     console.error(LOG, "first_node_query_failed", { empresaId, flowCode, message: error.message });
     return null;
   }
-  const row = data?.[0] as { node_code?: string } | undefined;
-  return row?.node_code?.trim() || null;
+  const rows = (data ?? []) as {
+    id: string;
+    node_code?: string | null;
+    next_node_code?: string | null;
+  }[];
+  if (rows.length === 0) return null;
+
+  const incoming = new Set<string>();
+  for (const r of rows) {
+    const nx = (r.next_node_code ?? "").trim();
+    if (nx) incoming.add(nx);
+  }
+  const nodeIds = rows.map((r) => r.id);
+  if (nodeIds.length > 0) {
+    const { data: optRows, error: optErr } = await supabase
+      .from("chat_flow_options")
+      .select("node_id, next_node_code")
+      .in("node_id", nodeIds);
+    if (optErr) {
+      console.warn(LOG, "first_node_options_query_failed", {
+        empresaId,
+        flowCode,
+        message: optErr.message,
+      });
+    }
+    for (const o of optRows ?? []) {
+      const nx = ((o as { next_node_code?: string | null }).next_node_code ?? "").trim();
+      if (nx) incoming.add(nx);
+    }
+  }
+
+  const root = rows.find((r) => !incoming.has((r.node_code ?? "").trim()));
+  const chosen = root ?? rows[0];
+  return chosen.node_code?.trim() || null;
 }
 
 export type SyncConversationFlowResult = {

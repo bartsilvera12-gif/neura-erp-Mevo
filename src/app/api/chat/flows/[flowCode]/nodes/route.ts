@@ -123,6 +123,21 @@ export async function POST(
       return NextResponse.json({ ok: false, error: "node_type inválido" }, { status: 400 });
     }
     const supabase = await getChatServiceClientForEmpresa(auth.empresa_id);
+    // El flujo debe existir en el catálogo: sin este check, un editor con una URL
+    // vieja (flujo borrado) escribe nodos huérfanos bajo un flow_code inexistente.
+    const { data: flowRow, error: flowErr } = await supabase
+      .from("chat_flows")
+      .select("id")
+      .eq("empresa_id", auth.empresa_id)
+      .eq("flow_code", flowCode)
+      .maybeSingle();
+    if (flowErr) return NextResponse.json({ ok: false, error: flowErr.message }, { status: 400 });
+    if (!flowRow) {
+      return NextResponse.json(
+        { ok: false, error: `El flujo "${flowCode}" no existe (¿fue borrado?). Recargá la lista de flujos.` },
+        { status: 404 }
+      );
+    }
     const { data: lastNode } = await supabase
       .from("chat_flow_nodes")
       .select("sort_order")

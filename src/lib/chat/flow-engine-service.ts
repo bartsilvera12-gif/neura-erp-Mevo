@@ -1187,6 +1187,12 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     mergeFlowVars?: Record<string, string>;
     gateReason: string;
   }): Promise<{ effectiveNext: string; redirected: boolean }> {
+    // El gate de completitud existe para capturar datos del participante de un SORTEO.
+    // En flujos sin sorteo vinculado NO aplica: su heurística trata cualquier nodo de
+    // botones como "captura de cantidad" y redirige/saltea nodos de flujos genéricos.
+    if (!(await getSorteoIdForChatFlow(supabase, input.empresaId, input.flowCode))) {
+      return { effectiveNext: input.proposedNextCode.trim(), redirected: false };
+    }
     const hydFd = await buildHydratedFlowDataForCompletenessGate({
       empresaId: input.empresaId,
       conversationId: input.conversationId,
@@ -1662,6 +1668,15 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     if (!node) return { ok: false, error: "Nodo actual no encontrado" };
 
     const sidGate = state.active_flow_session_id.trim();
+    // Gate de completitud: exclusivo de flujos vinculados a sorteo (ver
+    // resolveProposedNextWithCompletenessGate). En flujos genéricos ajustar el
+    // puntero saltea nodos configurados (p. ej. la bienvenida media inicial).
+    const sorteoIdPtrGate = await getSorteoIdForChatFlow(
+      supabase,
+      state.empresa_id,
+      state.flow_code
+    );
+    if (sorteoIdPtrGate) {
     const hydFdPointer = await buildHydratedFlowDataForCompletenessGate({
       empresaId: state.empresa_id,
       conversationId: state.id,
@@ -1723,6 +1738,7 @@ export function createFlowEngine(ctx: FlowEngineContext) {
         },
       });
       return sendCurrentFlowNode({ ...params, __autoHop: currentHop });
+    }
     }
 
     const flowVarsBase = await getConversationFlowDataMap({
