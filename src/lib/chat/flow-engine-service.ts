@@ -44,6 +44,7 @@ import {
   finalizeSorteoOrderFromConfirmedFlowData,
   getSorteoDatosIncompletosMessage,
   getSorteoIdForChatFlow,
+  isFlowSorteoSinComprobante,
   optionPayloadFinalizesSorteoOrder,
   parseSorteoParticipantFromFlowData,
   prepareFlowDataForSorteoOrder,
@@ -1193,6 +1194,15 @@ export function createFlowEngine(ctx: FlowEngineContext) {
       flowSessionId: input.flowSessionId,
       mergeFlowVars: input.mergeFlowVars,
     });
+    // Pre-registro sin comprobante: la cantidad es siempre 1 (no hay paso de cantidad).
+    // Sin esto, el gate de completitud trata TODO nodo de botones como "captura de cantidad"
+    // incompleta y redirige el avance de vuelta al inicio (loop: nunca sale del primer nodo).
+    if (
+      !String(hydFd["cantidad"] ?? "").trim() &&
+      (await isFlowSorteoSinComprobante(supabase, input.empresaId, input.flowCode))
+    ) {
+      hydFd["cantidad"] = "1";
+    }
     const resolved = await resolveEffectiveNodeCodeForFlowCompleteness(
       supabase,
       input.empresaId,
@@ -1659,6 +1669,13 @@ export function createFlowEngine(ctx: FlowEngineContext) {
       flowSessionId: sidGate,
       mergeFlowVars: params.mergeFlowVars,
     });
+    // Pre-registro sin comprobante: cantidad implícita = 1 (ver nota en resolveProposedNextWithCompletenessGate).
+    if (
+      !String(hydFdPointer["cantidad"] ?? "").trim() &&
+      (await isFlowSorteoSinComprobante(supabase, state.empresa_id, state.flow_code))
+    ) {
+      hydFdPointer["cantidad"] = "1";
+    }
     const ptrResolved = await resolveEffectiveNodeCodeForFlowCompleteness(
       supabase,
       state.empresa_id,
