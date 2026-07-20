@@ -77,9 +77,11 @@ export type FlowOptRowLite = {
   next_node_code: string | null;
 };
 
-/** Orden BFS de node_code (misma semántica que findResumeNode legacy). */
-export function buildFlowNodeBfsOrder(nodes: FlowNodeRowLite[], opts: FlowOptRowLite[]): string[] {
-  const byCode = new Map(nodes.map((n) => [n.node_code.trim(), n]));
+/** Aristas del grafo: `next_node_code` de los nodos + `next_node_code` de cada opción. */
+export function buildFlowNodeAdjacency(
+  nodes: FlowNodeRowLite[],
+  opts: FlowOptRowLite[]
+): { adj: Map<string, string[]>; targets: Set<string> } {
   const targets = new Set<string>();
   const adj = new Map<string, string[]>();
 
@@ -101,6 +103,39 @@ export function buildFlowNodeBfsOrder(nodes: FlowNodeRowLite[], opts: FlowOptRow
     const parent = idToCode.get(o.node_id);
     if (parent) addEdge(parent, o.next_node_code);
   }
+
+  return { adj, targets };
+}
+
+/**
+ * ¿`to` es alcanzable desde `from` siguiendo aristas (mínimo un salto)?
+ * Tolera ciclos (p. ej. el botón "Modificar" que vuelve a pedir los datos).
+ */
+export function isNodeDownstreamOf(
+  adj: Map<string, string[]>,
+  from: string,
+  to: string
+): boolean {
+  const start = norm(from);
+  const target = norm(to);
+  if (!start || !target) return false;
+  const seen = new Set<string>();
+  const queue = [...(adj.get(start) ?? [])];
+  while (queue.length) {
+    const code = queue.shift()!;
+    if (code === target) return true;
+    if (seen.has(code)) continue;
+    seen.add(code);
+    for (const nx of adj.get(code) ?? []) {
+      if (!seen.has(nx)) queue.push(nx);
+    }
+  }
+  return false;
+}
+
+/** Orden BFS de node_code (misma semántica que findResumeNode legacy). */
+export function buildFlowNodeBfsOrder(nodes: FlowNodeRowLite[], opts: FlowOptRowLite[]): string[] {
+  const { adj, targets } = buildFlowNodeAdjacency(nodes, opts);
 
   const roots = nodes.map((n) => n.node_code.trim()).filter((c) => !targets.has(c));
   const queue = [...roots];
@@ -149,6 +184,8 @@ export type FindIncompleteCaptureResult = {
 export type FlowCaptureGraphContext = {
   order: string[];
   nodesByCode: Map<string, FlowNodeRowLite>;
+  /** Aristas reales: distinguen "más adelante en el flujo" de "en otra rama". */
+  adj: Map<string, string[]>;
 };
 
 async function loadFlowCaptureGraphContext(
@@ -170,15 +207,19 @@ async function loadFlowCaptureGraphContext(
   const nodes = nodesRaw as FlowNodeRowLite[];
   const nodeIds = nodes.map((n) => n.id);
 
+  // `sort_order` explícito: sin él el orden de las aristas —y por lo tanto el BFS—
+  // depende de lo que devuelva el motor, que no está garantizado.
   const { data: optsRaw } = await supabase
     .from("chat_flow_options")
-    .select("node_id, next_node_code")
-    .in("node_id", nodeIds);
+    .select("node_id, next_node_code, sort_order")
+    .in("node_id", nodeIds)
+    .order("sort_order", { ascending: true });
   const opts = (optsRaw ?? []) as FlowOptRowLite[];
 
   const order = buildFlowNodeBfsOrder(nodes, opts);
   const nodesByCode = new Map(nodes.map((n) => [n.node_code.trim(), n]));
-  return { order, nodesByCode };
+  const { adj } = buildFlowNodeAdjacency(nodes, opts);
+  return { order, nodesByCode, adj };
 }
 
 function scanFirstIncompleteCapture(
@@ -304,9 +345,11 @@ export async function resolveEffectiveNodeCodeForFlowCompleteness(
     };
   }
 
-  const iInc = indexInFlowOrder(ctx.order, firstIncomplete.nodeCode);
-  const iProp = indexInFlowOrder(ctx.order, proposed);
-  if (iInc >= 0 && iProp >= 0 && iInc < iProp) {
+  // Solo retroceder si `proposed` está realmente AGUAS ABAJO de la captura pendiente.
+  // El índice BFS no alcanza: cuando el flujo tiene ramas paralelas (p. ej. un desvío
+  // "Aún no" que ocurre ANTES de pedir el dato), la captura queda con índice menor sin
+  // ser su predecesora, y redirigir ahí se come la rama que el cliente eligió.
+  if (isNodeDownstreamOf(ctx.adj, firstIncomplete.nodeCode, proposed)) {
     return {
       effectiveNodeCode: firstIncomplete.nodeCode,
       redirected: true,
