@@ -86,6 +86,9 @@ export async function registrarSorteoInscripcionSinComprobanteViaDirectPostgres(
   if (!idem) {
     return { ok: false, message: "Falta idempotency_key." };
   }
+  // Cédula normalizada a dígitos: los participantes la escriben con puntos, guiones
+  // o paréntesis, y "(7370144)" y "7370144" son la misma persona.
+  const ceDigits = String(input.cedula ?? "").replace(/\D/g, "");
 
   const nombreCompleto = input.nombreCompleto.trim();
   if (!nombreCompleto) {
@@ -139,6 +142,40 @@ export async function registrarSorteoInscripcionSinComprobanteViaDirectPostgres(
       );
       await client.query("COMMIT");
       return mapExistingRowToOk(ex, cupRes.rows, qty);
+    }
+
+    // Una sola inscripción por cédula en este sorteo. La idempotencia por
+    // `idempotency_key` no alcanza: incluye la sesión, así que volver a escribir
+    // desde otra conversación genera una clave nueva y duplicaba la inscripción.
+    // Comparamos solo dígitos para que el formato tipeado no abra la puerta.
+    // Devolvemos la entrada existente (misma forma que el camino idempotente): el
+    // participante recibe de nuevo SU número original, sin crear una fila nueva.
+    if (ceDigits) {
+      const dupRes = await client.query<{ id: string; numero_orden: number; estado_pago: string }>(
+        `SELECT id, numero_orden, estado_pago
+           FROM ${qsch}.sorteo_entradas
+          WHERE empresa_id = $1
+            AND sorteo_id = $2
+            AND regexp_replace(COALESCE(documento, ''), '[^0-9]', '', 'g') = $3
+          ORDER BY created_at
+          LIMIT 1`,
+        [input.empresaId, input.sorteoId, ceDigits]
+      );
+      if (dupRes.rows[0]) {
+        const ex = dupRes.rows[0];
+        const cupRes = await client.query<{ id: string; numero_cupon: string }>(
+          `SELECT id, numero_cupon FROM ${qsch}.sorteo_cupones WHERE entrada_id = $1 ORDER BY numero_cupon`,
+          [ex.id]
+        );
+        await client.query("COMMIT");
+        console.info(LOG, "cedula_ya_inscripta", {
+          schema: sch,
+          sorteo_id: input.sorteoId,
+          entrada_id: ex.id,
+          numero_orden: ex.numero_orden,
+        });
+        return mapExistingRowToOk(ex, cupRes.rows, qty);
+      }
     }
 
     const sortSelectCols = [
@@ -196,7 +233,8 @@ export async function registrarSorteoInscripcionSinComprobanteViaDirectPostgres(
     }
 
     const wa = normalizeTelefonoSorteo(input.whatsappNumero);
-    const ce = input.cedula.trim();
+    // Guardar normalizada, para que el chequeo de duplicados de arriba compare igual.
+    const ce = ceDigits || input.cedula.trim();
     const ciudad = input.ciudad.trim();
 
     // Upsert de cliente (mismo criterio que compra chat: por documento o teléfono).
