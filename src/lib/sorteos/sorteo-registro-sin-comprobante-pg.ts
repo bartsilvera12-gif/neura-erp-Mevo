@@ -249,7 +249,10 @@ export async function registrarSorteoInscripcionSinComprobanteViaDirectPostgres(
     const rowEnt: Record<string, unknown> = {
       empresa_id: input.empresaId,
       sorteo_id: input.sorteoId,
-      conversacion_id: input.conversationId,
+      // FK a `sorteo_conversaciones` (legacy), NO a `chat_conversations`: pasar el id
+      // de la conversación de chat rompe la FK. El vínculo con el chat va en
+      // `chat_conversation_id`. Mismo criterio que sorteo-order-direct-pg / manual-pg.
+      conversacion_id: null,
       cliente_id: clienteId,
       whatsapp_numero: wa,
       nombre_participante: nombreCompleto,
