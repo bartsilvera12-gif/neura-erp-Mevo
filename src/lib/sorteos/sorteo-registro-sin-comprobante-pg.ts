@@ -273,8 +273,12 @@ export async function registrarSorteoInscripcionSinComprobanteViaDirectPostgres(
     };
     if (entCols.has("ciudad")) rowEnt.ciudad = ciudad || null;
     if (entCols.has("validado_at")) rowEnt.validado_at = nowIso;
-    if (entCols.has("venta_origen")) rowEnt.venta_origen = "chat_sin_comprobante";
-    if (entCols.has("venta_canal")) rowEnt.venta_canal = "whatsapp";
+    // Valores acotados por CHECK constraints (ver migración
+    // 20260505140000_sorteo_entradas_manual_erp_meta.sql):
+    //   venta_origen IN ('whatsapp_flow','erp_manual') | venta_canal IN ('remote','local')
+    // La marca de "sin comprobante" queda en `validado_por`, no acá.
+    if (entCols.has("venta_origen")) rowEnt.venta_origen = "whatsapp_flow";
+    if (entCols.has("venta_canal")) rowEnt.venta_canal = "remote";
 
     const insertCols = Object.keys(rowEnt).filter((k) => entCols.has(k));
     const vals = insertCols.map((k) => rowEnt[k]);
