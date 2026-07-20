@@ -2,7 +2,12 @@ import "server-only";
 
 import type { AppSupabaseClient } from "@/lib/supabase/schema";
 import { SORTEO_COMPROBANTE_ESTADO_VALIDACION_FIELD } from "@/lib/chat/comprobante-validation-types";
-import { prepareFlowDataForSorteoOrder, getSorteoIdForChatFlow } from "@/lib/sorteos/sorteo-order-from-chat";
+import {
+  applyCantidadFallbackOneIfMissing,
+  getSorteoIdForChatFlow,
+  isFlowSorteoSinComprobante,
+  prepareFlowDataForSorteoOrder,
+} from "@/lib/sorteos/sorteo-order-from-chat";
 import {
   describeFlowCaptureCompletenessForLogs,
   isParticipantSummaryReviewNode,
@@ -92,7 +97,7 @@ export async function canCloseSorteoPurchase(params: {
   closePurchaseOnlyOnFinalConfirmation: boolean;
   interaction: SorteoCloseInteraction;
 }): Promise<CanCloseSorteoPurchaseResult> {
-  const prep = prepareFlowDataForSorteoOrder({ ...params.flowData });
+  let prep = prepareFlowDataForSorteoOrder({ ...params.flowData });
   const sorteoId = await getSorteoIdForChatFlow(params.supabase, params.empresaId, params.flowCode);
   if (!sorteoId) {
     return {
@@ -103,6 +108,14 @@ export async function canCloseSorteoPurchase(params: {
       participantComplete: false,
       finalConfirmationDetected: false,
     };
+  }
+
+  // Pre-registro sin comprobante: no existe paso de cantidad (1 número por inscripto).
+  // Sin este fallback el scan de completitud toma el primer nodo de botones como
+  // "captura de cantidad" pendiente y bloquea el cierre con "Faltan datos para cerrar
+  // la compra", aunque el participante haya cargado todos sus datos.
+  if (await isFlowSorteoSinComprobante(params.supabase, params.empresaId, params.flowCode)) {
+    prep = applyCantidadFallbackOneIfMissing(prep);
   }
 
   const hasValidation = validationAllowsClose(prep);
