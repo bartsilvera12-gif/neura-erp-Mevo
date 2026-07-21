@@ -1251,7 +1251,18 @@ export type MyAgentOperationalPresenceResult =
  * Si no participa en ninguna cola, `in_queues: false`.
  */
 export async function getMyAgentOperationalPresence(): Promise<MyAgentOperationalPresenceResult> {
-  const { supabase, empresa_id, usuario_id, dataSchema } = await requireEmpresaTenantServiceRole();
+  return getMyAgentOperationalPresenceWithCtx(await requireEmpresaTenantServiceRole());
+}
+
+/**
+ * Igual que `getMyAgentOperationalPresence` pero recibe el contexto tenant ya resuelto.
+ * Evita re-ejecutar `requireEmpresaTenantServiceRole` (auth.getUser + usuarios + empresas)
+ * cuando el caller ya lo tiene — p. ej. el bootstrap del inbox, que antes lo resolvía dos veces.
+ */
+async function getMyAgentOperationalPresenceWithCtx(
+  ctx: Pick<EmpresaTenantSrContext, "supabase" | "empresa_id" | "usuario_id" | "dataSchema">
+): Promise<MyAgentOperationalPresenceResult> {
+  const { supabase, empresa_id, usuario_id, dataSchema } = ctx;
   const pool = getChatPostgresPool();
   if (pool && isLikelyUnexposedTenantChatSchema(dataSchema)) {
     const r = await pgGetMyAgentOperationalPresence(pool, dataSchema, empresa_id, usuario_id);
@@ -1356,9 +1367,11 @@ export async function fetchOmnicanalUxSummary(): Promise<{
 }
 
 export async function getConversacionesInboxBootstrap(): Promise<ConversacionesInboxBootstrap> {
-  const { supabase, catalogSr, empresa_id, usuario_id, dataSchema } = await requireEmpresaTenantServiceRole();
+  const ctx = await requireEmpresaTenantServiceRole();
+  const { supabase, catalogSr, empresa_id, usuario_id, dataSchema } = ctx;
   const [presence, scope] = await Promise.all([
-    getMyAgentOperationalPresence(),
+    // Reutiliza el ctx ya resuelto en vez de re-resolver auth+empresa (antes eran ~3 idas extra).
+    getMyAgentOperationalPresenceWithCtx(ctx),
     getOmnicanalScope(supabase, empresa_id, usuario_id, {
       tenantDataSchema: dataSchema,
     }),
