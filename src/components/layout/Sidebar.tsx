@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { fetchModuleAccess } from "@/lib/api/module-access-client";
 import { getCurrentUser } from "@/lib/auth";
 import { isBootstrapSuperAdminEmail } from "@/lib/auth/super-admin-bootstrap-email";
 import { supabase } from "@/lib/supabase";
@@ -422,27 +423,24 @@ export default function Sidebar() {
           return;
         }
 
-        const res = await fetchWithSupabaseSession("/api/empresas/module-access", {
-          cache: "no-store",
-        });
+        // Carga inicial: comparte el fetch con el AuthGuard (coalescido). Recargas por
+        // evento de auth (silent): traen fresco.
+        const ma = await fetchModuleAccess(silent);
         if (cancelled) return;
 
         let superA = false;
         let modList: ModuloEmpresa[] = [];
         const bootstrapSuper = isBootstrapSuperAdminEmail(session.user.email ?? null);
 
-        if (res.ok) {
-          const body = (await res.json()) as {
-            superAdmin?: boolean;
-            modulos?: ModuloEmpresa[];
-          };
-          superA = !!body.superAdmin || bootstrapSuper;
-          modList = Array.isArray(body.modulos) ? body.modulos : [];
+        if (ma.ok) {
+          superA = ma.superAdmin || bootstrapSuper;
+          modList = ma.modulos;
         } else {
           superA = bootstrapSuper;
         }
 
-        if (!superA) {
+        // Fallback por cliente solo cuando el endpoint autoritativo no respondió.
+        if (!superA && !ma.ok) {
           try {
             const cu = await getCurrentUser();
             if ((cu?.rol ?? "").trim() === "super_admin") {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { fetchModuleAccess } from "@/lib/api/module-access-client";
 import { getCurrentUser, getSession } from "@/lib/auth";
 import { isBootstrapSuperAdminEmail } from "@/lib/auth/super-admin-bootstrap-email";
 import {
@@ -48,25 +48,17 @@ function AuthGuardInner({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const res = await fetchWithSupabaseSession("/api/empresas/module-access", {
-        cache: "no-store",
-      });
+      // Fetch compartido con el Sidebar (coalescido): una sola llamada por carga.
+      const ma = await fetchModuleAccess();
       if (cancelled) return;
 
-      let superAdmin = false;
-      let slugs: string[] = [];
-
       const bootstrapSuper = isBootstrapSuperAdminEmail(session.user.email ?? null);
+      let superAdmin = (ma.ok && ma.superAdmin) || bootstrapSuper;
+      const slugs = ma.slugs;
 
-      if (res.ok) {
-        const data = (await res.json()) as { superAdmin?: boolean; slugs?: string[] };
-        superAdmin = !!data.superAdmin || bootstrapSuper;
-        slugs = Array.isArray(data.slugs) ? data.slugs : [];
-      } else {
-        superAdmin = bootstrapSuper;
-      }
-
-      if (!superAdmin) {
+      // Solo si el endpoint autoritativo NO respondió caemos al re-chequeo por cliente;
+      // cuando respondió, su `superAdmin` ya es definitivo (evita un round trip extra).
+      if (!superAdmin && !ma.ok) {
         try {
           const cu = await getCurrentUser();
           if ((cu?.rol ?? "").trim() === "super_admin") superAdmin = true;
