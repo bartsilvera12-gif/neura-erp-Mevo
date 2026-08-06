@@ -153,6 +153,63 @@ function whatsAppInteractiveTitleFromOption(o: FlowOption): string {
   return "Opción";
 }
 
+/**
+ * Normaliza texto de WhatsApp para compararlo contra labels/valores de botones:
+ * minúsculas, sin acentos, sin emojis ni signos, espacios colapsados.
+ */
+function normalizeButtonReplyText(raw: string): string {
+  return (raw ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Respuestas de texto frecuentes que equivalen a "avanzar" cuando el nodo espera
+ * que el cliente toque el primer botón (participar / continuar / confirmar). El
+ * primer botón de cada nodo del flujo siempre es el que hace avanzar, así que
+ * tratamos estos sinónimos como si se hubiera tocado esa opción.
+ */
+const BUTTON_AFFIRMATIVE_SYNONYMS: ReadonlySet<string> = new Set([
+  "participar",
+  "quiero participar",
+  "quiero",
+  "ya les sigo",
+  "ya te sigo",
+  "ya los sigo",
+  "ya sigo",
+  "ya te segui",
+  "listo",
+  "ok",
+  "oka",
+  "okey",
+  "okok",
+  "dale",
+  "si",
+  "sii",
+  "sisi",
+  "si quiero",
+  "claro",
+  "de una",
+  "comenzar",
+  "empezar",
+  "continuar",
+  "seguir",
+  "vamos",
+]);
+
+/** Mensaje por defecto cuando el cliente escribe en vez de tocar un botón. */
+const BUTTONS_REPROMPT_DEFAULT_MESSAGE =
+  "😊 Para continuar necesitás tocar uno de los botones que aparecen debajo del mensaje.\n" +
+  "Si no los ves, esperá unos segundos o abrí nuevamente la conversación.\n" +
+  "👇 Elegí una opción para continuar.";
+
+/** Ventana anti-spam: no reenviar el recordatorio de botones más de una vez por minuto. */
+const BUTTONS_REPROMPT_THROTTLE_MS = 60_000;
+
 type FlowNode = {
   id: string;
   empresa_id: string;
@@ -697,6 +754,36 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     }
     if (!data) return true;
     return (data as { activo?: boolean }).activo !== false;
+  }
+
+  /**
+   * Mensaje del recordatorio "tocá un botón". Editable por flujo sin redeploy vía
+   * chat_flows.flow_config.buttons_reprompt_message; si no está, usa el default.
+   */
+  async function getButtonsRepromptMessage(
+    empresaId: string,
+    flowCode: string
+  ): Promise<string> {
+    try {
+      const { data } = await supabase
+        .from("chat_flows")
+        .select("flow_config")
+        .eq("empresa_id", empresaId)
+        .eq("flow_code", flowCode)
+        .maybeSingle();
+      const cfg = (data as { flow_config?: Record<string, unknown> | null } | null)?.flow_config;
+      const custom =
+        cfg && typeof cfg === "object" && !Array.isArray(cfg)
+          ? (cfg as Record<string, unknown>).buttons_reprompt_message
+          : undefined;
+      if (typeof custom === "string" && custom.trim()) return custom.trim();
+    } catch (e) {
+      console.warn("[flow-engine] getButtonsRepromptMessage_failed", {
+        flowCode,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+    return BUTTONS_REPROMPT_DEFAULT_MESSAGE;
   }
 
   async function wasNodeSentForCurrentStep(
@@ -3454,6 +3541,125 @@ export function createFlowEngine(ctx: FlowEngineContext) {
         payload: { text_value: textValue, raw: params.rawPayload },
       });
       return { ok: true, status: "image_expected_text_received" };
+    }
+    // Nodo con botones/lista: el cliente escribió texto en vez de tocar un botón.
+    // Antes esto se ignoraba en silencio (ignored_not_text_node) y dejaba la
+    // conversación sin respuesta. Ahora: (1) intentamos interpretar el texto como
+    // botón (label / option_value / sinónimo afirmativo → primer botón), y si no
+    // se puede, (2) respondemos con un recordatorio amable y reenviamos el mismo
+    // nodo con sus botones, sin mover el puntero (throttle 1/min anti-spam).
+    if (currentNode.node_type === "buttons" || currentNode.node_type === "list") {
+      const btnOptions = await getNodeOptions(currentNode.id);
+      const normalizedIn = normalizeButtonReplyText(textValue);
+
+      let matched: FlowOption | undefined;
+      if (btnOptions.length > 0 && normalizedIn) {
+        matched = btnOptions.find((o) => {
+          const lbl = normalizeButtonReplyText(o.label ?? "");
+          const val = normalizeButtonReplyText(o.option_value ?? "");
+          return (lbl && lbl === normalizedIn) || (val && val === normalizedIn);
+        });
+        if (!matched && BUTTON_AFFIRMATIVE_SYNONYMS.has(normalizedIn)) {
+          matched = btnOptions[0];
+        }
+      }
+
+      if (matched) {
+        await insertFlowEvent({
+          empresaId: state.empresa_id,
+          conversationId: state.id,
+          flowCode: state.flow_code,
+          nodeCode: currentNode.node_code,
+          flowSessionId: state.active_flow_session_id,
+          eventType: "text_interpreted_as_button",
+          selectedOptionId: matched.id,
+          payload: {
+            text_value: textValue,
+            matched_label: matched.label,
+            matched_option_value: matched.option_value,
+          },
+        });
+        console.info("[flow-engine] text_interpreted_as_button", {
+          conversationId: state.id,
+          nodeCode: currentNode.node_code,
+          text: textValue.slice(0, 40),
+          matchedOptionValue: matched.option_value,
+        });
+        return processInteractiveReply({
+          conversationId: state.id,
+          empresaId: state.empresa_id,
+          metaButtonId: matched.id,
+          rawPayload: {
+            ...(params.rawPayload ?? {}),
+            neura_synthetic_button_from_text: textValue,
+          },
+        });
+      }
+
+      // No se pudo interpretar: recordatorio amable + reenviar el nodo (con throttle).
+      let throttled = false;
+      const sinceIso = new Date(Date.now() - BUTTONS_REPROMPT_THROTTLE_MS).toISOString();
+      const { data: lastReprompt } = await supabase
+        .from("chat_flow_events")
+        .select("id")
+        .eq("conversation_id", state.id)
+        .eq("event_type", "buttons_text_reprompt")
+        .gte("created_at", sinceIso)
+        .limit(1)
+        .maybeSingle();
+      throttled = Boolean((lastReprompt as { id?: string } | null)?.id);
+
+      if (throttled) {
+        await insertFlowEvent({
+          empresaId: state.empresa_id,
+          conversationId: state.id,
+          flowCode: state.flow_code,
+          nodeCode: currentNode.node_code,
+          flowSessionId: state.active_flow_session_id,
+          eventType: "buttons_text_reprompt_throttled",
+          payload: { text_value: textValue },
+        });
+        return { ok: true, status: "buttons_text_reprompt_throttled" };
+      }
+
+      const repromptMsg = await getButtonsRepromptMessage(state.empresa_id, state.flow_code);
+      const sendCtxBtn = await getConversationSendContext(state.id);
+      const sendReminder = await flowSendText(sendCtxBtn, repromptMsg);
+      if (sendReminder.ok) {
+        await persistOutgoingMessage({
+          conversation: state,
+          content: repromptMsg,
+          messageType: "text",
+          waMessageId: sendReminder.waMessageId,
+          raw: sendReminder.raw,
+          senderType: "system",
+          automationSource: "flow_engine",
+        });
+      }
+      // Reenviar el nodo actual con sus botones visibles (no mueve el puntero).
+      const resent = await sendCurrentFlowNode({ conversationId: state.id });
+      await insertFlowEvent({
+        empresaId: state.empresa_id,
+        conversationId: state.id,
+        flowCode: state.flow_code,
+        nodeCode: currentNode.node_code,
+        flowSessionId: state.active_flow_session_id,
+        eventType: "buttons_text_reprompt",
+        payload: {
+          text_value: textValue,
+          reminder_sent: sendReminder.ok,
+          node_resent: resent.ok,
+          resent_error: resent.ok ? null : resent.error ?? null,
+        },
+      });
+      console.info("[flow-engine] buttons_text_reprompt", {
+        conversationId: state.id,
+        nodeCode: currentNode.node_code,
+        text: textValue.slice(0, 40),
+        reminderSent: sendReminder.ok,
+        nodeResent: resent.ok,
+      });
+      return { ok: true, status: "buttons_text_reprompt" };
     }
     if (currentNode.node_type !== "text" || !currentNode.save_as_field?.trim()) {
       return { ok: true, status: "ignored_not_text_node" };
