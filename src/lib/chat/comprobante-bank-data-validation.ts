@@ -40,6 +40,15 @@ export function normalizeBankAccountDigits(s: string): string {
 }
 
 /**
+ * Dígitos significativos de una cuenta: sin ceros a la izquierda.
+ * Ninguna cuenta bancaria real empieza en 0; algunos comprobantes (p. ej. Basa)
+ * anteponen uno o varios ceros al número destino. Ese cero es ruido, no dato.
+ */
+export function significantAccountDigits(s: string): string {
+  return normalizeBankAccountDigits(s).replace(/^0+/, "");
+}
+
+/**
  * Heurística mínima sobre texto OCR completo (no reemplaza el extractor de monto/referencia).
  */
 export function extractBankDetailsFromOcr(fullText: string): BankDetailsOcr {
@@ -108,10 +117,19 @@ function titularMatches(expected: string, ocr: string): boolean {
 }
 
 function cuentaMatches(expected: string, ocr: string): boolean {
-  const a = normalizeBankAccountDigits(expected);
-  const b = normalizeBankAccountDigits(ocr);
+  // Comparamos por dígitos significativos (sin ceros a la izquierda que agrega el banco)
+  // y aceptamos que una sea prefijo o sufijo de la otra: los comprobantes a veces
+  // muestran la cuenta destino truncada al inicio o al final ("AH-052500597130…").
+  const a = significantAccountDigits(expected);
+  const b = significantAccountDigits(ocr);
   if (a.length < 4 || b.length < 4) return false;
-  return a === b || a.endsWith(b) || b.endsWith(a);
+  if (a === b) return true;
+  // Prefijo/sufijo: exigir solape sustancial (>=6 dígitos) para no matchear
+  // cuentas cortas ajenas que casualmente empiecen/terminen igual.
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+  if (shorter.length >= 6 && (longer.startsWith(shorter) || longer.endsWith(shorter))) return true;
+  return false;
 }
 
 function aliasMatches(expected: string, ocr: string): boolean {
