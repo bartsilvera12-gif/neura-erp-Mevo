@@ -161,7 +161,12 @@ function buildEntradaWhereParts(
   empresaId: string,
   p: NormalizedListParams,
   startParamIndex: number,
-  tableAlias?: string
+  tableAlias?: string,
+  /**
+   * Tabla de cupones (ya calificada con esquema) para buscar SOLO por número de cupón.
+   * Vista «Cupones»: el buscador debe matchear el número de cupón, no nombre/teléfono/orden.
+   */
+  cuponSearchTable?: string
 ): { sql: string; params: unknown[]; nextIdx: number } {
   const a = tableAlias ? `${tableAlias}.` : "";
   const conds: string[] = [`${a}empresa_id = $${startParamIndex}::uuid`];
@@ -175,12 +180,20 @@ function buildEntradaWhereParts(
   }
   if (p.q && p.q.length > 0) {
     const term = `%${p.q.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
-    conds.push(
-      `(${a}nombre_participante ILIKE $${i} ESCAPE '\\'
-        OR COALESCE(${a}documento::text, '') ILIKE $${i} ESCAPE '\\'
-        OR ${a}whatsapp_numero ILIKE $${i} ESCAPE '\\'
-        OR CAST(${a}numero_orden AS text) ILIKE $${i} ESCAPE '\\')`
-    );
+    if (cuponSearchTable) {
+      conds.push(
+        `EXISTS (SELECT 1 FROM ${cuponSearchTable} cbsq
+           WHERE cbsq.entrada_id = ${a}id AND cbsq.empresa_id = ${a}empresa_id
+             AND cbsq.numero_cupon ILIKE $${i} ESCAPE '\\')`
+      );
+    } else {
+      conds.push(
+        `(${a}nombre_participante ILIKE $${i} ESCAPE '\\'
+          OR COALESCE(${a}documento::text, '') ILIKE $${i} ESCAPE '\\'
+          OR ${a}whatsapp_numero ILIKE $${i} ESCAPE '\\'
+          OR CAST(${a}numero_orden AS text) ILIKE $${i} ESCAPE '\\')`
+      );
+    }
     params.push(term);
     i++;
   }
@@ -290,7 +303,8 @@ async function fetchSorteoCuponesOrdenesPgDirect(
   const tCli = quoteSchemaTable(sch, "clientes");
   const tFlowData = quoteSchemaTable(sch, "chat_flow_data");
 
-  const { sql: whereSe, params: baseParams } = buildEntradaWhereParts(empresaId, listParams, 1, "se");
+  // Vista «Cupones»: el buscador matchea SOLO el número de cupón (pasa tCup).
+  const { sql: whereSe, params: baseParams } = buildEntradaWhereParts(empresaId, listParams, 1, "se", tCup);
   const existsCupon = `EXISTS (
     SELECT 1 FROM ${tCup} c
     WHERE c.entrada_id = se.id AND c.empresa_id = se.empresa_id
@@ -635,14 +649,15 @@ async function fetchSorteoCuponesOrdenesPostgrest(
 
   let qb = sb
     .from("sorteo_entradas")
-    .select("*, sorteo_cupones!inner(entrada_id)", { count: "exact" })
+    .select("*, sorteo_cupones!inner(entrada_id, numero_cupon)", { count: "exact" })
     .eq("empresa_id", empresaId);
 
   if (listParams.sorteoId) qb = qb.eq("sorteo_id", listParams.sorteoId);
   if (listParams.estadoPago) qb = qb.eq("estado_pago", listParams.estadoPago);
   if (listParams.q && listParams.q.length > 0) {
+    // Vista «Cupones»: buscar SOLO por número de cupón (recurso embebido, join inner).
     const t = `%${listParams.q}%`;
-    qb = qb.or(`nombre_participante.ilike.${t},documento.ilike.${t},whatsapp_numero.ilike.${t}`);
+    qb = qb.ilike("sorteo_cupones.numero_cupon", t);
   }
 
   const { data: entradasRaw, error: e1, count } = await qb
