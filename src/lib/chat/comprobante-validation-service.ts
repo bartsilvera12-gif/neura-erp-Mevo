@@ -716,6 +716,14 @@ export async function runComprobanteValidationPipeline(ctx: PipelineCtx): Promis
   } else if (bankFlowResult.apply && !bankFlowResult.ok) {
     estado = "datos_bancarios_incoherentes";
     motivo = bankFlowResult.motivoDetalle ?? "datos_bancarios:discrepancia";
+  } else if (bankFlowResult.audit.bank_val_status === "omitido_sin_ocr_bancario") {
+    // Validación bancaria configurada (titular/cuenta/alias esperados) pero el OCR NO pudo
+    // leer la cuenta destino del comprobante. Antes esto quedaba "valido" por defecto y
+    // emitía cupones sin poder verificar a qué cuenta fue el pago (hueco: comprobantes
+    // ilegibles o de otra cuenta pasaban). Ahora se manda a revisión manual: no emite
+    // cupones hasta que un humano lo apruebe (los legítimos con foto mala se aprueban a mano).
+    estado = "revision_manual";
+    motivo = "datos_bancarios_ilegibles_revision";
   } else if (sospecha) {
     estado = "revision_manual";
     motivo = "ocr_texto_corto_sospecha";
