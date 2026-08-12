@@ -49,6 +49,17 @@ export function significantAccountDigits(s: string): string {
 }
 
 /**
+ * Núcleo de un alias tipo teléfono/CI: sin ceros a la izquierda ni prefijo país 595.
+ * El alias local "0994350953" aparece en los comprobantes como "+595994350953";
+ * ambos comparten el núcleo "994350953".
+ */
+export function significantPhoneDigits(s: string): string {
+  let d = normalizeBankAccountDigits(s).replace(/^0+/, "");
+  if (d.startsWith("595") && d.length > 9) d = d.slice(3);
+  return d;
+}
+
+/**
  * Heurística mínima sobre texto OCR completo (no reemplaza el extractor de monto/referencia).
  */
 export function extractBankDetailsFromOcr(fullText: string): BankDetailsOcr {
@@ -113,7 +124,13 @@ function titularMatches(expected: string, ocr: string): boolean {
   const a = normalizeBankText(expected);
   const b = normalizeBankText(ocr);
   if (!a || !b) return false;
-  return a === b || a.includes(b) || b.includes(a);
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+  // Distinto orden de palabras: "Marcos Eduardo Valdez Ocampos" vs "Valdez Ocampos Marcos Eduardo".
+  // Todas las palabras (>=3 letras) del nombre esperado están presentes en el OCR.
+  const bWords = new Set(b.split(" ").filter((w) => w.length >= 3));
+  const aWords = a.split(" ").filter((w) => w.length >= 3);
+  if (aWords.length >= 2 && aWords.every((w) => bWords.has(w))) return true;
+  return false;
 }
 
 function cuentaMatches(expected: string, ocr: string): boolean {
@@ -136,12 +153,20 @@ function aliasMatches(expected: string, ocr: string): boolean {
   const a = normalizeBankText(expected);
   const b = normalizeBankText(ocr);
   if (!a || !b) return false;
-  if (a === b || a.includes(b) || b.includes(a)) return true;
-  /** CI/RUC/CVU con guiones vs OCR sin guiones o solo dígitos */
-  const da = normalizeBankAccountDigits(expected);
-  const db = normalizeBankAccountDigits(ocr);
-  if (da.length >= 6 && db.length >= 6 && da === db) return true;
-  return false;
+  if (a === b) return true;
+  const da = significantPhoneDigits(expected);
+  const db = significantPhoneDigits(ocr);
+  // Si ambos tienen núcleo numérico (teléfono/CI/RUC), decidir SOLO por él, tolerando
+  // +595 y ceros ("0994350953" ↔ "+595994350953"). No usar substring de texto acá: evita
+  // que una cola corta ("350953") matchee por estar contenida en el número esperado.
+  if (da.length >= 6 && db.length >= 6) {
+    if (da === db) return true;
+    const shorter = da.length <= db.length ? da : db;
+    const longer = da.length <= db.length ? db : da;
+    return shorter.length >= 8 && (longer.startsWith(shorter) || longer.endsWith(shorter));
+  }
+  // Alias de texto (no numérico): includes con longitud mínima.
+  return a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a));
 }
 
 /**
@@ -220,11 +245,16 @@ function supplementBankDetailsFromFullText(
 }
 
 function countPairwiseMatches(expected: DatosBancariosEsperadosConfig, ocr: BankDetailsOcr): number {
+  // Cross-field: cada dato esperado se busca en CUALQUIER campo leído por el OCR, no solo
+  // en el campo homónimo. El extractor a veces asigna el valor al slot equivocado —el
+  // alias-teléfono suele caer en "cuenta", "mobile" cae en "alias"— y un pago legítimo
+  // terminaba rechazado. Si tu cuenta/alias/nombre aparece en el comprobante, el dinero fue
+  // a vos, sin importar la etiqueta del campo.
+  const fields = [ocr.titular, ocr.numero_cuenta, ocr.alias].map((f) => (f ?? "").trim()).filter(Boolean);
   let m = 0;
-  if (expected.titular.trim() && ocr.titular.trim() && titularMatches(expected.titular, ocr.titular)) m++;
-  if (expected.numero_cuenta.trim() && ocr.numero_cuenta.trim() && cuentaMatches(expected.numero_cuenta, ocr.numero_cuenta))
-    m++;
-  if (expected.alias.trim() && ocr.alias.trim() && aliasMatches(expected.alias, ocr.alias)) m++;
+  if (expected.titular.trim() && fields.some((f) => titularMatches(expected.titular, f))) m++;
+  if (expected.numero_cuenta.trim() && fields.some((f) => cuentaMatches(expected.numero_cuenta, f))) m++;
+  if (expected.alias.trim() && fields.some((f) => aliasMatches(expected.alias, f))) m++;
   return m;
 }
 
