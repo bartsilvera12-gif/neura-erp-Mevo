@@ -45,3 +45,9 @@ next-env.d.ts
 
 # Playwright E2E artefactos locales
 e2e-super-admin*.png
+
+# Datos con PII de clientes (no versionar)
+clientes_pendientes_FINAL.csv
+mil_numeros_reactivacion.csv
+*_clientes_*.csv
+mil_numeros*.csv
