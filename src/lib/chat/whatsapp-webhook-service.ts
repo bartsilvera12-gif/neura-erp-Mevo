@@ -85,6 +85,16 @@ const WH_MSG = "[webhooks/whatsapp][insert_message]";
 const WH_FLOW = "[webhooks/whatsapp][flow_session]";
 const WH_STATUS = "[whatsapp-status]";
 
+/**
+ * Claim gate contra duplicación por reintentos de Meta. Meta reintenta el webhook si tarda,
+ * y el chequeo `messageExists()` (SELECT sin lock) deja pasar reintentos paralelos → el motor
+ * corre 2-5 veces → el cliente recibe la bienvenida/combos duplicados.
+ * Con el gate activo, el early-persist (INSERT idempotente sobre `wa_message_id`) decide:
+ * el que gana el insert procesa; el que pierde (`duplicate`) es un reintento y NO ejecuta el motor.
+ * `WEBHOOK_CLAIM_GATE_ENABLED=false` lo desactiva (rollback instantáneo, sin deploy).
+ */
+const WEBHOOK_CLAIM_GATE_ENABLED = process.env.WEBHOOK_CLAIM_GATE_ENABLED !== "false";
+
 function contactNameForWa(
   contacts: MetaWebhookValue["contacts"],
   waId: string
@@ -837,7 +847,22 @@ export async function processInboundWebhookValue(
         });
         if (early.ok || early.duplicate) {
           inboundMessageAlreadyPersisted = true;
-          console.info(WH_MSG, "early_inbound_persist_ok", {
+          // CLAIM GATE: si perdí el claim (otra invocación ya insertó este wa_message_id primero),
+          // esto es un reintento/duplicado de Meta → NO ejecutar el motor (evita bienvenida/combos
+          // duplicados). Se preservan las excepciones existentes: botones/lista (reprocesan routing
+          // de campañas) y comprobantes-media (tienen su propio dedup por image_received).
+          if (
+            WEBHOOK_CLAIM_GATE_ENABLED &&
+            !early.ok &&
+            early.duplicate &&
+            !mustRetryInboundRoutingDespiteDedupe &&
+            !isComprobanteMediaMessageKind(msg)
+          ) {
+            console.info("[claim][lost]", { conversationId, wa_mid: waMid, msgType: msgTypeInbound });
+            skipped += 1;
+            continue;
+          }
+          console.info(WH_MSG, early.ok ? "[claim][won]" : "early_inbound_persist_ok", {
             conversationId,
             wa_mid: waMid,
             duplicate: !early.ok,
