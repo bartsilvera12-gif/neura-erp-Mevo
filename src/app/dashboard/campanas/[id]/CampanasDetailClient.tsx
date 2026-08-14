@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import {
   buildCampaignTemplatePreviewText,
@@ -109,6 +109,8 @@ export default function CampanasDetailClient({
     { kind: "success" | "error"; message: string } | null
   >(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  /** Evita solapar pasadas de /api/campanas/process mientras una sigue en vuelo. */
+  const processInFlightRef = useRef(false);
   const [showEvents, setShowEvents] = useState(false);
 
   const load = useCallback(async () => {
@@ -152,13 +154,22 @@ export default function CampanasDetailClient({
   useEffect(() => {
     if (!campaign || campaign.status !== "sending") return;
     const t = window.setInterval(() => {
+      // Guard anti-solape: no lanzar una nueva pasada de /process si la anterior
+      // sigue en vuelo. Reduce las llamadas concurrentes al worker (la corrección
+      // real es el claim atómico del servidor, esto es defensa en profundidad).
+      if (processInFlightRef.current) return;
+      processInFlightRef.current = true;
       void (async () => {
-        await fetchWithSupabaseSession("/api/campanas/process", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ campaign_id: campaignId }),
-        });
-        await load();
+        try {
+          await fetchWithSupabaseSession("/api/campanas/process", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ campaign_id: campaignId }),
+          });
+          await load();
+        } finally {
+          processInFlightRef.current = false;
+        }
       })();
     }, 4000);
     return () => window.clearInterval(t);

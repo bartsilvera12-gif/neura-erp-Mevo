@@ -73,13 +73,20 @@ export async function runCampaignProcessOnce(params: {
     return { processed: 0, remainingQueued: 0, campaignCompleted: st === "completed" || st === "cancelled" };
   }
 
+  // Recuperación de rows trabados en "sending" (p. ej. una pasada que crasheó
+  // antes de escribir provider_message_id). CRÍTICO: sólo reencolar los REALMENTE
+  // trabados (updated_at viejo). Sin el filtro de tiempo, este bloque reencolaba
+  // rows que otra pasada concurrente está enviando ahora mismo (sending, todavía
+  // sin provider_message_id) y provocaba reenvío — anulando el claim atómico.
+  const stuckBefore = new Date(Date.now() - 120_000).toISOString();
   await supabase
     .from("chat_campaign_recipients")
     .update({ status: "queued", updated_at: new Date().toISOString() })
     .eq("empresa_id", empresaId)
     .eq("campaign_id", campaignId)
     .eq("status", "sending")
-    .is("provider_message_id", null);
+    .is("provider_message_id", null)
+    .lt("updated_at", stuckBefore);
 
   if ((campaign as { template_id?: string | null }).template_id) {
     const tid = (campaign as { template_id: string }).template_id;
@@ -139,11 +146,26 @@ export async function runCampaignProcessOnce(params: {
     }
 
     const ts = new Date().toISOString();
-    await supabase
+    // Claim atómico (compare-and-swap): sólo un worker puede transicionar
+    // queued -> sending para este destinatario. Con el poll de /process cada 4s
+    // y lotes que tardan >4s, varias pasadas seleccionan el MISMO row `queued`;
+    // sin este CAS todas lo reenviaban (se observaron hasta 10 copias por cliente).
+    // Postgres serializa los UPDATE por lock de fila: el primero pasa queued->sending
+    // y devuelve 1 fila; los siguientes ven status='sending' (o provider_message_id
+    // ya seteado), matchean 0 filas y se saltan sin reenviar.
+    const { data: claimed, error: claimErr } = await supabase
       .from("chat_campaign_recipients")
       .update({ status: "sending", updated_at: ts })
       .eq("id", rec.id)
-      .eq("empresa_id", empresaId);
+      .eq("empresa_id", empresaId)
+      .eq("status", "queued")
+      .is("provider_message_id", null)
+      .select("id");
+
+    if (claimErr || !claimed || claimed.length === 0) {
+      // Otra pasada concurrente ya reclamó/envió este destinatario: no reenviar.
+      continue;
+    }
 
     const send = await sendCampaignRecipientMessage({
       supabase,
