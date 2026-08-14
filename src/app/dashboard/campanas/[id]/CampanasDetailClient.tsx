@@ -102,6 +102,12 @@ export default function CampanasDetailClient({
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Estado de carga específico del botón de validación (spinner + deshabilitado). */
+  const [validating, setValidating] = useState(false);
+  /** Resultado visible de la última validación: éxito (ready) o error con motivo concreto. */
+  const [validateFeedback, setValidateFeedback] = useState<
+    { kind: "success" | "error"; message: string } | null
+  >(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [showEvents, setShowEvents] = useState(false);
 
@@ -412,24 +418,68 @@ export default function CampanasDetailClient({
   }
 
   async function validateMapping() {
+    setValidating(true);
     setBusy(true);
     setErr(null);
+    setValidateFeedback(null);
     const body: Record<string, string> = {};
     for (const [k, v] of Object.entries(mapping)) {
       body[k] = v;
     }
-    const res = await fetchWithSupabaseSession(`/api/campanas/${campaignId}/validate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ variable_mapping_json: body }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
-    setBusy(false);
-    if (!res.ok || !json.success) {
-      setErr(json.error ?? "Validación fallida");
-      return;
+    try {
+      const res = await fetchWithSupabaseSession(`/api/campanas/${campaignId}/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ variable_mapping_json: body }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+        data?: { ready?: boolean; mapping_errors?: number; header_image_ok?: boolean };
+      };
+      // Fallo real de la request (500, auth, red): mostrar el error del backend.
+      if (!res.ok || !json.success) {
+        setValidateFeedback({
+          kind: "error",
+          message: json.error ?? "No se pudo validar la campaña. Intentá de nuevo.",
+        });
+        return;
+      }
+      // La request fue OK pero la campaña puede NO haber quedado lista (ready=false).
+      // Antes esto recargaba en silencio y dejaba la campaña en draft sin explicar por qué.
+      const result = json.data ?? {};
+      if (result.ready === false) {
+        let message: string;
+        if (result.header_image_ok === false) {
+          message =
+            "La plantilla tiene imagen de cabecera pero falta la URL (header_image_url). " +
+            "Agregá la columna header_image_url en el Excel (misma URL https en cada fila) " +
+            "o configurala en la campaña, y validá de nuevo.";
+        } else if ((result.mapping_errors ?? 0) > 0) {
+          message =
+            `${result.mapping_errors} destinatario(s) sin variables completas. ` +
+            "Revisá el mapeo contra las columnas del Excel y validá de nuevo.";
+        } else {
+          message =
+            "La campaña no quedó lista. Revisá el mapeo y la imagen de cabecera, y validá de nuevo.";
+        }
+        setValidateFeedback({ kind: "error", message });
+        return;
+      }
+      setValidateFeedback({
+        kind: "success",
+        message: "✓ Campaña validada y marcada como lista para enviar.",
+      });
+    } catch (e) {
+      setValidateFeedback({
+        kind: "error",
+        message: e instanceof Error ? e.message : "Error de red al validar. Intentá de nuevo.",
+      });
+    } finally {
+      setValidating(false);
+      setBusy(false);
+      await load();
     }
-    await load();
   }
 
   async function launch() {
@@ -545,6 +595,20 @@ export default function CampanasDetailClient({
       {err ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
           {err}
+        </div>
+      ) : null}
+
+      {validateFeedback ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`rounded-lg border px-3 py-2 text-sm ${
+            validateFeedback.kind === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+              : "border-red-200 bg-red-50 text-red-800"
+          }`}
+        >
+          {validateFeedback.message}
         </div>
       ) : null}
 
@@ -696,11 +760,21 @@ export default function CampanasDetailClient({
             </button>
             <button
               type="button"
-              disabled={busy || !canImport}
+              disabled={busy || validating || !canImport}
               onClick={() => void validateMapping()}
-              className="rounded-lg bg-[#4FAEB2] px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-[#4FAEB2]/25 transition-colors hover:bg-[#3F8E91] disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#4FAEB2] px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-[#4FAEB2]/25 transition-colors hover:bg-[#3F8E91] disabled:opacity-50"
             >
-              Validar destinatarios
+              {validating ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                  />
+                  Validando…
+                </>
+              ) : (
+                "Validar destinatarios"
+              )}
             </button>
           </div>
 
@@ -754,11 +828,21 @@ export default function CampanasDetailClient({
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
-              disabled={busy || !canImport}
+              disabled={busy || validating || !canImport}
               onClick={() => void validateMapping()}
-              className="rounded-lg bg-[#4FAEB2] px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-[#4FAEB2]/25 transition-colors hover:bg-[#3F8E91] disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#4FAEB2] px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-[#4FAEB2]/25 transition-colors hover:bg-[#3F8E91] disabled:opacity-50"
             >
-              Marcar campaña como lista para enviar
+              {validating ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                  />
+                  Validando…
+                </>
+              ) : (
+                "Marcar campaña como lista para enviar"
+              )}
             </button>
           </div>
         </section>
