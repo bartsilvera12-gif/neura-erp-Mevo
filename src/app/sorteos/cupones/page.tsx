@@ -155,11 +155,11 @@ export default async function SorteoCuponesPage({
         </div>
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Buscar</span>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Buscar por N.º de cupón</span>
             <input
               name="q"
               defaultValue={q ?? ""}
-              placeholder="Nombre, doc, teléfono…"
+              placeholder="N.º de cupón (ej. 0001)…"
               className="w-[220px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20"
             />
           </label>
