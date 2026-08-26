@@ -75,6 +75,15 @@ export interface ComprobanteValidationSettings {
   revision_manual_activar_takeover: boolean;
   /** Texto OCR más corto que esto → sospecha (si el toggle de sospecha está activo). */
   ocr_min_chars_sospecha: number;
+  /**
+   * Endurecimiento anti-fraude (default true): si el comprobante quedaría "valido" pero SIN
+   * ninguna confirmación fuerte (monto que coincida o datos bancarios que coincidan) y el OCR
+   * no reúne señales mínimas de ser un comprobante real, se manda a revisión manual en vez de
+   * auto-aprobar. Cierra el hueco de "acepta cualquier imagen con texto".
+   */
+  exigir_comprobante_plausible: boolean;
+  /** Señales mínimas ({monto, banco, fecha, hora, referencia, palabras clave}) para considerarlo plausible. */
+  min_senales_comprobante: number;
   /** Cuando falla OCR o PDF sin OCR automático. */
   ocr_fallo_comportamiento: OnMissingBehavior;
   messages: ComprobanteValidationMessages;
@@ -177,6 +186,8 @@ export function defaultComprobanteValidationSettings(): ComprobanteValidationSet
     revision_manual_si_sospecha_ocr: true,
     revision_manual_activar_takeover: false,
     ocr_min_chars_sospecha: 24,
+    exigir_comprobante_plausible: true,
+    min_senales_comprobante: 2,
     ocr_fallo_comportamiento: "revision_manual",
     messages: { ...DEFAULT_COMPROBANTE_VALIDATION_MESSAGES },
     ocr_fields: {
@@ -340,6 +351,11 @@ export function parseComprobanteValidationConfig(config: unknown): ComprobanteVa
       typeof r.ocr_min_chars_sospecha === "number" && r.ocr_min_chars_sospecha >= 0
         ? Math.min(500, Math.trunc(r.ocr_min_chars_sospecha))
         : base.ocr_min_chars_sospecha,
+    exigir_comprobante_plausible: boolOr(r.exigir_comprobante_plausible, base.exigir_comprobante_plausible),
+    min_senales_comprobante:
+      typeof r.min_senales_comprobante === "number" && r.min_senales_comprobante >= 0
+        ? Math.min(6, Math.trunc(r.min_senales_comprobante))
+        : base.min_senales_comprobante,
     ocr_fallo_comportamiento: isOnMissingBehavior(fallo) ? fallo : base.ocr_fallo_comportamiento,
     messages: mergedMessages,
     ocr_fields: ocrMerged,
@@ -364,6 +380,8 @@ export function comprobanteValidationSettingsForForm(
     revision_manual_si_sospecha_ocr: settings.revision_manual_si_sospecha_ocr,
     revision_manual_activar_takeover: settings.revision_manual_activar_takeover,
     ocr_min_chars_sospecha: settings.ocr_min_chars_sospecha,
+    exigir_comprobante_plausible: settings.exigir_comprobante_plausible,
+    min_senales_comprobante: settings.min_senales_comprobante,
     ocr_fallo_comportamiento: settings.ocr_fallo_comportamiento,
     messages: { ...settings.messages },
     ocr_fields: JSON.parse(JSON.stringify(settings.ocr_fields)),

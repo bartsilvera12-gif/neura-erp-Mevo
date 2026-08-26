@@ -168,6 +168,45 @@ function fieldValue(key: OcrFieldKey, extracted: ExtractedReceiptFields): string
   return extracted[key]?.trim() ?? "";
 }
 
+/**
+ * Palabras típicas de un comprobante de transferencia/pago (PY). Una o más coincidencias
+ * cuentan como UNA sola señal (no una por palabra), para no inflar el puntaje con texto largo.
+ */
+const RECEIPT_KEYWORDS = [
+  "transferenc",
+  "comprobante",
+  "operaci",
+  "guaran",
+  "importe",
+  "monto",
+  "pago exitoso",
+  "pago realizado",
+  "transaccion",
+  "transacción",
+  "deposito",
+  "depósito",
+  "enviaste",
+  "recibo",
+  "voucher",
+];
+
+/**
+ * Cuenta señales de que la imagen realmente es un comprobante (y no una foto cualquiera):
+ * campos extraídos por el OCR + un bloque de palabras clave. Sirve para NO auto-aprobar
+ * imágenes sin evidencia de ser un comprobante cuando no hubo validación fuerte.
+ */
+function receiptSignalCount(extracted: ExtractedReceiptFields, fullText: string): number {
+  let n = 0;
+  if (extracted.monto.trim()) n++;
+  if (extracted.banco.trim()) n++;
+  if (extracted.fecha.trim()) n++;
+  if (extracted.hora.trim()) n++;
+  if (extracted.referencia.trim()) n++;
+  const tl = (fullText || "").toLowerCase();
+  if (RECEIPT_KEYWORDS.some((k) => tl.includes(k))) n++;
+  return n;
+}
+
 function rankMissing(b: OnMissingBehavior): number {
   if (b === "bloquear") return 3;
   if (b === "revision_manual") return 2;
@@ -727,6 +766,41 @@ export async function runComprobanteValidationPipeline(ctx: PipelineCtx): Promis
   } else if (sospecha) {
     estado = "revision_manual";
     motivo = "ocr_texto_corto_sospecha";
+  }
+
+  // --- Endurecimiento anti "acepta cualquier comprobante" ---
+  // El pipeline resuelve "valido" por defecto salvo que una regla lo tumbe. Sin monto ni
+  // datos bancarios verificados, cualquier foto con algo de texto pasaba y emitía cupones.
+  // Acá exigimos evidencia real antes de auto-aprobar cuando NO hubo confirmación fuerte:
+  //   (1) monto activo pero el OCR no leyó importe → revisión manual (no se puede verificar).
+  //   (2) sin señales mínimas de ser un comprobante → revisión manual.
+  // Un humano aprueba los legítimos con foto mala; el resto ya no se auto-aprueba.
+  if (estado === "valido") {
+    const montoConfirmado = montoFlowResult.apply && montoFlowResult.ok;
+    const bancoConfirmado = bankFlowResult.apply && bankFlowResult.ok;
+    const sinConfirmacionFuerte = !montoConfirmado && !bancoConfirmado;
+
+    if (
+      sinConfirmacionFuerte &&
+      settings.validar_monto_vs_flujo &&
+      montoFlowResult.audit.monto_validacion_status === "omitido_sin_ocr"
+    ) {
+      estado = "revision_manual";
+      motivo = "monto_no_legible_revision";
+    } else if (sinConfirmacionFuerte && settings.exigir_comprobante_plausible) {
+      const senales = receiptSignalCount(extracted, fullText);
+      if (senales < settings.min_senales_comprobante) {
+        estado = "revision_manual";
+        motivo = `comprobante_no_plausible:senales=${senales}/${settings.min_senales_comprobante}`;
+        console.info("[sorteo-comprobante][plausibilidad-bloqueo]", {
+          empresa_id: ctx.empresaId,
+          conversation_id: ctx.conversationId,
+          flow_session_id: sid,
+          senales,
+          min_requeridas: settings.min_senales_comprobante,
+        });
+      }
+    }
   }
 
   const validationId = await insertValidationRow(supabase, {
