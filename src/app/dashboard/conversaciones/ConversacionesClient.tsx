@@ -447,7 +447,6 @@ export function ConversacionesClient({
       : null
   );
   /** Ancla de sesión en esta pestaña inbox (tiempo de uso del módulo). */
-  const [sessionSinceIso, setSessionSinceIso] = useState<string | null>(null);
   const [finalizeSaving, setFinalizeSaving] = useState(false);
   const [finalizeOptions, setFinalizeOptions] = useState<FinalizeOptionsResult | null>(null);
   const [finalizeStateId, setFinalizeStateId] = useState("");
@@ -981,11 +980,6 @@ export function ConversacionesClient({
       cancelled = true;
     };
   }, [mode, initialOperationalPresence]);
-
-  useEffect(() => {
-    if (mode !== "inbox") return;
-    setSessionSinceIso((prev) => prev ?? new Date().toISOString());
-  }, [mode]);
 
   useEffect(() => {
     if (mode !== "inbox" || !opInQueues) return;
@@ -2163,21 +2157,14 @@ export function ConversacionesClient({
           <h1 className="mt-1 text-xl sm:text-2xl font-semibold tracking-tight text-slate-900 leading-tight truncate">
             {agentDisplayName}
           </h1>
-          <p className="text-xs text-slate-500 leading-snug mt-1">
-            {mode === "historial"
-              ? "Historial omnicanal"
-              : vista === "inbox"
-                ? "Inbox"
-                : "Bot"}
-            {mode === "historial" ? (
-              <>
-                {" · "}
-                <Link href="/dashboard/conversaciones" className="text-[#4FAEB2] hover:underline font-medium">
-                  Inbox
-                </Link>
-              </>
-            ) : null}
-          </p>
+          {mode === "historial" ? (
+            <p className="text-xs text-slate-500 leading-snug mt-1">
+              Historial omnicanal{" · "}
+              <Link href="/dashboard/conversaciones" className="text-[#4FAEB2] hover:underline font-medium">
+                Inbox
+              </Link>
+            </p>
+          ) : null}
         </div>
         {mode === "inbox" && opPresenceLoaded && !opInQueues ? (
           initialCabeceraInsignia === "admin" ? (
@@ -2269,22 +2256,9 @@ export function ConversacionesClient({
                 <span className="text-slate-400 italic">sin marca de tiempo en DB</span>
               )}
             </div>
-            {sessionSinceIso ? (
-              <div className="text-[10px] text-slate-600 text-right leading-tight w-full border-t border-slate-200/80 pt-1 mt-0.5">
-                <span className="text-slate-500">Sesión en inbox:</span>{" "}
-                <LiveElapsedLabel sinceIso={sessionSinceIso} />
-              </div>
-            ) : null}
           </div>
         ) : null}
       </div>
-      {mode === "inbox" && sessionSinceIso && !opInQueues ? (
-        <div className="flex justify-end w-full shrink-0 -mt-1">
-          <p className="text-[10px] text-slate-500 tabular-nums">
-            Sesión en inbox: <LiveElapsedLabel sinceIso={sessionSinceIso} />
-          </p>
-        </div>
-      ) : null}
       {mode === "inbox" && opPresenceErr ? (
         <div className="bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-lg px-2 py-1.5 shrink-0">
           {opPresenceErr}

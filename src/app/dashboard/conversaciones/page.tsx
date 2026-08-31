@@ -35,14 +35,17 @@ export default async function ConversacionesInboxPage() {
 
   return (
     <Suspense fallback={<div className="p-6 text-slate-400 text-sm animate-pulse">Cargando conversaciones…</div>}>
-      <ConversacionesClient
-        mode="inbox"
-        chatDataSchema={chatDataSchema}
-        agentDisplayName={agentDisplayName}
-        initialOperationalPresence={initialOperationalPresence}
-        initialCabeceraInsignia={initialCabeceraInsignia}
-        initialOmnicanalRole={bootstrap?.omnicanal_role ?? null}
-      />
+      {/* -mt-6 anula el padding superior del AppShell solo en esta ruta para ganar altura. */}
+      <div className="-mt-6">
+        <ConversacionesClient
+          mode="inbox"
+          chatDataSchema={chatDataSchema}
+          agentDisplayName={agentDisplayName}
+          initialOperationalPresence={initialOperationalPresence}
+          initialCabeceraInsignia={initialCabeceraInsignia}
+          initialOmnicanalRole={bootstrap?.omnicanal_role ?? null}
+        />
+      </div>
     </Suspense>
   );
 }
