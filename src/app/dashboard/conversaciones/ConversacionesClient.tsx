@@ -62,7 +62,6 @@ import { assignmentWaitBadge, assignmentWaitBadgeClass } from "@/lib/chat/inbox-
 import type { OmnicanalOperatorRole } from "@/lib/chat/omnicanal-supervision-read";
 import { playInboxNotificationBeep, readInboxNotificationSoundEnabled } from "@/lib/chat/inbox-notification-preference";
 import { createBrowserClientForSchema } from "@/lib/supabase";
-import { ChannelBadge } from "@/components/chat/ChannelBadge";
 
 type ChatMessage = {
   id: string;
@@ -2386,7 +2385,7 @@ export function ConversacionesClient({
                   key={c.id}
                   type="button"
                   onClick={() => handleSelect(c.id)}
-                  className={`w-full text-left px-3 py-3 border-b border-slate-100 transition-colors ${
+                  className={`w-full text-left px-3 py-2 border-b border-slate-100 transition-colors ${
                     isSelected ? "bg-white border-l-[3px] border-l-[#4FAEB2]" : "hover:bg-white"
                   }`}
                 >
@@ -2428,15 +2427,12 @@ export function ConversacionesClient({
                           )}
                         </div>
                       </div>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        <ChannelBadge type={c.channel.type} nombre={c.channel.nombre} />
-                      </div>
-                      <p className="mt-1.5 text-[12px] text-slate-500 truncate leading-snug">
+                      <p className="mt-1 text-[12px] text-slate-500 truncate leading-snug">
                         {c.last_message_preview || "—"}
                       </p>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
+                  <div className="flex flex-wrap gap-1 mt-1">
                     <span
                       className={`text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${badgeEstadoClass(c.status)}`}
                     >
@@ -2672,119 +2668,6 @@ export function ConversacionesClient({
                           </div>
                         </div>
 
-                        {/* Row 2: meta chips uniformes */}
-                        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                          <ChannelBadge type={selected.channel.type} nombre={selected.channel.nombre} />
-                          {vista === "bot" ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-800">
-                              <span aria-hidden="true" className="h-1 w-1 rounded-full bg-violet-500" />
-                              Bot
-                            </span>
-                          ) : isHumanActive ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                              <span aria-hidden="true" className="h-1 w-1 rounded-full bg-emerald-500" />
-                              Humano
-                            </span>
-                          ) : null}
-                          <span
-                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${badgeEstadoClass(selected.status)}`}
-                          >
-                            {labelEstado(selected.status)}
-                          </span>
-
-                          {vista !== "bot" ? (
-                            <>
-                              <span aria-hidden="true" className="mx-0.5 h-3.5 w-px bg-slate-200" />
-                              {selected.queue_name ? (
-                                <span
-                                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 truncate max-w-[12rem]"
-                                  title="Cola de enrutamiento"
-                                >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    className="h-3 w-3 shrink-0 text-slate-400"
-                                    aria-hidden="true"
-                                  >
-                                    <rect x="3" y="6" width="18" height="12" rx="2" />
-                                    <path d="M7 10h10M7 14h6" />
-                                  </svg>
-                                  {selected.queue_name}
-                                </span>
-                              ) : mode === "inbox" ? (
-                                <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                                  Sin cola
-                                </span>
-                              ) : null}
-                              <InboxReplyTurnBadges c={selected} dense />
-                              {selected.assigned_agent_name ? (
-                                <span
-                                  className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 truncate max-w-[11rem]"
-                                  title="Agente asignado"
-                                >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    className="h-3 w-3 shrink-0"
-                                    aria-hidden="true"
-                                  >
-                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                                    <circle cx="12" cy="7" r="4" />
-                                  </svg>
-                                  {selected.assigned_agent_name}
-                                </span>
-                              ) : mode === "inbox" ? (
-                                (() => {
-                                  const w = assignmentWaitBadge(
-                                    selected.assignment_wait_code,
-                                    Boolean(selected.queue_id)
-                                  );
-                                  return (
-                                    <span
-                                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${assignmentWaitBadgeClass(w.tone)}`}
-                                      title="Aún sin agente asignado"
-                                    >
-                                      <UserRound className="h-3 w-3 shrink-0" aria-hidden />
-                                      Sin agente · {w.label}
-                                    </span>
-                                  );
-                                })()
-                              ) : null}
-                            </>
-                          ) : null}
-
-                          {selected.contact.cliente_id || selected.contact.crm_prospecto_id ? (
-                            <>
-                              <span aria-hidden="true" className="mx-0.5 h-3.5 w-px bg-slate-200" />
-                              {selected.contact.cliente_id ? (
-                                <Link
-                                  href={`/clientes/${selected.contact.cliente_id}`}
-                                  className="inline-flex items-center gap-1 rounded-full border border-[#4FAEB2]/30 bg-[#4FAEB2]/8 px-2 py-0.5 text-[10px] font-semibold text-[#3F8E91] transition-colors hover:bg-[#4FAEB2]/12"
-                                >
-                                  Cliente →
-                                </Link>
-                              ) : null}
-                              {selected.contact.crm_prospecto_id ? (
-                                <Link
-                                  href={`/crm/${selected.contact.crm_prospecto_id}`}
-                                  className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 transition-colors hover:bg-violet-100"
-                                >
-                                  CRM →
-                                </Link>
-                              ) : null}
-                            </>
-                          ) : null}
-                        </div>
                       </div>
                     );
                   })()
