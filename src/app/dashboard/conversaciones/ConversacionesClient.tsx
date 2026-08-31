@@ -289,17 +289,6 @@ function parseInboxFilters(sp: URLSearchParams): ChatInboxFilters | undefined {
   };
 }
 
-function formatChannelOptionLabel(c: ChatChannelRow): string {
-  const name = (c.nombre ?? "").trim() || "Canal";
-  const kind = [c.type, c.provider].filter(Boolean).join(" / ");
-  const mp = c.meta_phone_number_id?.trim();
-  const tail =
-    mp && mp.length > 0
-      ? ` · ${mp.length > 18 ? `${mp.slice(0, 16)}…` : mp}`
-      : "";
-  return `${name} · ${kind}${tail}`;
-}
-
 function labelEstado(s: string) {
   if (s === "open") return "Abierta";
   if (s === "pending") return "Pendiente";
@@ -351,7 +340,6 @@ export function ConversacionesClient({
   agentDisplayName,
   initialOperationalPresence,
   initialCabeceraInsignia = null,
-  initialOmnicanalRole = null,
 }: {
   mode: ConversacionesClientMode;
   /** Esquema Postgres de tablas chat_* (zentra_erp o `er_…`). */
@@ -429,29 +417,6 @@ export function ConversacionesClient({
   const [botFlowsChecked, setBotFlowsChecked] = useState(false);
   const [compValidacionesOpen, setCompValidacionesOpen] = useState(false);
   const [listColumnHidden, setListColumnHidden] = useState(false);
-  /**
-   * Collapsa el encabezado del módulo (eyebrow + nombre + insignia + tabs +
-   * filtros) para maximizar el espacio del chat. Persiste en localStorage.
-   */
-  const [headerCollapsed, setHeaderCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return window.localStorage.getItem("conversaciones:headerCollapsed") === "1";
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(
-        "conversaciones:headerCollapsed",
-        headerCollapsed ? "1" : "0",
-      );
-    } catch {
-      /* ignore */
-    }
-  }, [headerCollapsed]);
   /** Texto del buscador (inmediato). Filtra la página cargada y, con ≥3, dispara búsqueda server-side. */
   const [listSearch, setListSearch] = useState("");
   /** Término debounced que efectivamente se manda al servidor (vacío si <3 chars). */
@@ -513,9 +478,6 @@ export function ConversacionesClient({
   const urlAsignacion =
     urlAsignacionRaw === "mios" ? "mios" : urlAsignacionRaw === "sin_asignar" ? "sin_asignar" : "";
 
-  const displayCanal = pendingCanal !== null ? pendingCanal : urlCanal;
-  const displayCola = pendingCola !== null ? pendingCola : urlCola;
-  const displayAsignacion = pendingAsignacion !== null ? pendingAsignacion : urlAsignacion;
 
   useEffect(() => {
     if (pendingCanal !== null && pendingCanal === urlCanal) setPendingCanal(null);
@@ -2187,56 +2149,6 @@ export function ConversacionesClient({
         </div>
       ) : null}
 
-      {/* Toggle "Ocultar / Mostrar barra" — siempre visible. Persiste en
-          localStorage. Permite maximizar el espacio del chat. */}
-      <div className="flex shrink-0 items-center justify-end">
-        <button
-          type="button"
-          onClick={() => setHeaderCollapsed((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:bg-[#4FAEB2]/5 hover:text-[#3F8E91]"
-          title={headerCollapsed ? "Mostrar barra superior" : "Ocultar barra superior"}
-          aria-pressed={headerCollapsed}
-        >
-          {headerCollapsed ? (
-            <>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-3.5 w-3.5"
-                aria-hidden="true"
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-              Mostrar barra
-            </>
-          ) : (
-            <>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-3.5 w-3.5"
-                aria-hidden="true"
-              >
-                <polyline points="18 15 12 9 6 15" />
-              </svg>
-              Ocultar barra
-            </>
-          )}
-        </button>
-      </div>
-
-      {!headerCollapsed ? (
-      <>
       <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -2420,94 +2332,6 @@ export function ConversacionesClient({
         </div>
       ) : null}
 
-      {(mode === "historial" || vista === "inbox") ? (
-        <div className="flex flex-wrap items-end gap-3 shrink-0 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <label className="flex flex-col gap-1.5 min-w-[12rem]">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Canal
-            </span>
-            <select
-              className="appearance-none rounded-xl border border-slate-200 bg-white bg-[length:14px_14px] bg-[right_0.7rem_center] bg-no-repeat px-3 py-2 pr-8 text-xs font-medium text-slate-700 shadow-sm outline-none transition-colors hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20 min-w-[12rem] max-w-[min(22rem,90vw)]"
-              style={{
-                backgroundImage:
-                  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%234FAEB2' stroke-width='2.5'><path stroke-linecap='round' stroke-linejoin='round' d='M6 9l6 6 6-6'/></svg>\")",
-              }}
-              value={displayCanal}
-              onChange={(e) => {
-                const v = e.target.value.trim();
-                setPendingCanal(v.length > 0 ? v : "");
-                patchInboxQuery({ canal: v.length > 0 ? v : null });
-              }}
-              aria-label="Filtrar por canal"
-            >
-              <option value="">Todos los canales</option>
-              {inboxChannels.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {formatChannelOptionLabel(c)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1.5 min-w-[11rem]">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Cola
-            </span>
-            <select
-              className="appearance-none rounded-xl border border-slate-200 bg-white bg-[length:14px_14px] bg-[right_0.7rem_center] bg-no-repeat px-3 py-2 pr-8 text-xs font-medium text-slate-700 shadow-sm outline-none transition-colors hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20 min-w-[11rem]"
-              style={{
-                backgroundImage:
-                  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%234FAEB2' stroke-width='2.5'><path stroke-linecap='round' stroke-linejoin='round' d='M6 9l6 6 6-6'/></svg>\")",
-              }}
-              value={displayCola}
-              onChange={(e) => {
-                const v = e.target.value.trim();
-                setPendingCola(v.length > 0 ? v : "");
-                patchInboxQuery({ cola: v.length > 0 ? v : null });
-              }}
-              aria-label="Filtrar por cola"
-            >
-              <option value="">Todas (según tu alcance)</option>
-              {opsQueues
-                .filter((q) => q.is_active)
-                .map((q) => (
-                  <option key={q.id} value={q.id}>
-                    {q.nombre}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1.5 min-w-[11rem]">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Asignación
-            </span>
-            <select
-              className="appearance-none rounded-xl border border-slate-200 bg-white bg-[length:14px_14px] bg-[right_0.7rem_center] bg-no-repeat px-3 py-2 pr-8 text-xs font-medium text-slate-700 shadow-sm outline-none transition-colors hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20 min-w-[11rem]"
-              style={{
-                backgroundImage:
-                  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%234FAEB2' stroke-width='2.5'><path stroke-linecap='round' stroke-linejoin='round' d='M6 9l6 6 6-6'/></svg>\")",
-              }}
-              value={displayAsignacion}
-              onChange={(e) => {
-                const v = e.target.value;
-                setPendingAsignacion(v === "" ? "" : v);
-                patchInboxQuery({ asignacion: v === "" ? null : v });
-              }}
-              aria-label="Filtrar por asignación"
-            >
-              <option value="">Todas</option>
-              {opInQueues ? <option value="mios">Asignadas a mí</option> : null}
-              <option value="sin_asignar">Sin asignar</option>
-            </select>
-          </label>
-          {initialOmnicanalRole === "supervisor" ? (
-            <p className="text-[11px] text-slate-500 max-w-[18rem] leading-snug pb-0.5">
-              Colas y vistas acotadas a tu equipo supervisado (mismo criterio que inbox y monitoreo).
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      </>
-      ) : null}
 
       {hasActiveChannel === false && (
         <div className="bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-lg px-2 py-2 shrink-0">
