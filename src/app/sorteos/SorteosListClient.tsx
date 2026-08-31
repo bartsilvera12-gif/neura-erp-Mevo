@@ -360,9 +360,11 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
                       </td>
                       <td className="px-5 py-3 text-right">
                         <div className="inline-flex items-center justify-end gap-2">
-                          {/* Finalizar: tenant-only El Papu Store. Otros clientes no se tocan. */}
+                          {/* Finalizar: habilitado por tenant (El Papu Store + Mevo). Otros clientes no se tocan. */}
                           {s.estado === "activo" &&
-                          process.env.NEXT_PUBLIC_NEURA_CLIENT_SCHEMA === "elpapustore_erp" ? (
+                          ["elpapustore_erp", "mevoerp"].includes(
+                            process.env.NEXT_PUBLIC_NEURA_CLIENT_SCHEMA ?? ""
+                          ) ? (
                             <button
                               type="button"
                               onClick={() => finalizarSorteo(s.id)}
