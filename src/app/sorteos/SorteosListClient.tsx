@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getSorteos } from "@/lib/sorteos/actions";
-import type { SorteosVentasKpis } from "@/lib/sorteos/ventas-kpis";
+import { getSorteosVentasKpisPorSorteo } from "@/lib/sorteos/ventas-kpis";
+import type { SorteosVentasKpis, SorteosKpisPorSorteo } from "@/lib/sorteos/ventas-kpis";
 import type { Sorteo } from "@/lib/sorteos/types";
 
 function formatGs(n: number) {
@@ -192,17 +193,57 @@ function NavTabs() {
 
 // ── Componente principal ──────────────────────────────────────────────────────
 
+/** Sorteo por defecto para las tarjetas: el `activo` más reciente; si no hay, el más reciente. */
+function pickDefaultSorteoId(rows: Sorteo[]): string | null {
+  if (rows.length === 0) return null;
+  const sorted = [...rows].sort((a, b) => {
+    const aActive = (a.estado ?? "").trim() === "activo" ? 1 : 0;
+    const bActive = (b.estado ?? "").trim() === "activo" ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+    const at = a.created_at ? Date.parse(a.created_at) : 0;
+    const bt = b.created_at ? Date.parse(b.created_at) : 0;
+    return bt - at;
+  });
+  return sorted[0]?.id ?? null;
+}
+
 export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosVentasKpis }) {
   const [rows, setRows] = useState<Sorteo[]>([]);
   const [cargando, setCargando] = useState(true);
   const [finalizandoId, setFinalizandoId] = useState<string | null>(null);
+  const [kpisMap, setKpisMap] = useState<SorteosKpisPorSorteo>({});
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     getSorteos()
-      .then(setRows)
+      .then((data) => {
+        setRows(data);
+        // Selección por defecto: sorteo activo más reciente.
+        setSelectedId((prev) => prev ?? pickDefaultSorteoId(data));
+      })
       .catch(() => setRows([]))
       .finally(() => setCargando(false));
+    getSorteosVentasKpisPorSorteo()
+      .then(setKpisMap)
+      .catch(() => setKpisMap({}));
   }, []);
+
+  // Tarjetas: KPIs del sorteo seleccionado; si aún no cargó el mapa, caen a los del server (sorteo vigente).
+  const cards = useMemo(() => {
+    const perSorteo = selectedId ? kpisMap[selectedId] : undefined;
+    if (perSorteo) return perSorteo;
+    return {
+      boletosHoy: ventasKpis.boletosHoy,
+      montoHoy: ventasKpis.montoHoy,
+      boletosSorteo: ventasKpis.boletosSorteo,
+      montoSorteo: ventasKpis.montoSorteo,
+    };
+  }, [selectedId, kpisMap, ventasKpis]);
+
+  const selectedNombre = useMemo(() => {
+    const r = rows.find((x) => x.id === selectedId);
+    return (r?.nombre ?? ventasKpis.sorteoNombre ?? "").trim();
+  }, [rows, selectedId, ventasKpis.sorteoNombre]);
 
   async function finalizarSorteo(id: string) {
     if (
@@ -264,26 +305,26 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Boletos hoy"
-          value={ventasKpis.boletosHoy.toLocaleString("es-PY")}
-          sub="Vendidos hoy"
+          value={cards.boletosHoy.toLocaleString("es-PY")}
+          sub={selectedNombre ? `${selectedNombre} · hoy` : "Vendidos hoy"}
           icon={<IconTicket />}
         />
         <KpiCard
           label="Boletos del sorteo"
-          value={ventasKpis.boletosSorteo.toLocaleString("es-PY")}
-          sub={ventasKpis.sorteoNombre ? `${ventasKpis.sorteoNombre} · desde el inicio` : "Desde el inicio del sorteo"}
+          value={cards.boletosSorteo.toLocaleString("es-PY")}
+          sub={selectedNombre ? `${selectedNombre} · desde el inicio` : "Desde el inicio del sorteo"}
           icon={<IconTrophy />}
         />
         <KpiCard
           label="Monto hoy"
-          value={formatGs(ventasKpis.montoHoy)}
-          sub="Ingresos de hoy"
+          value={formatGs(cards.montoHoy)}
+          sub={selectedNombre ? `${selectedNombre} · hoy` : "Ingresos de hoy"}
           icon={<IconWallet />}
         />
         <KpiCard
           label="Monto del sorteo"
-          value={formatGs(ventasKpis.montoSorteo)}
-          sub={ventasKpis.sorteoNombre ? `${ventasKpis.sorteoNombre} · desde el inicio` : "Ingresos desde el inicio del sorteo"}
+          value={formatGs(cards.montoSorteo)}
+          sub={selectedNombre ? `${selectedNombre} · desde el inicio` : "Ingresos desde el inicio del sorteo"}
           icon={<IconCoins />}
           accent="featured"
         />
@@ -339,9 +380,26 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
               <tbody className="divide-y divide-slate-100">
                 {rows.map((s) => {
                   const meta = estadoMeta(s.estado);
+                  const isSelected = s.id === selectedId;
                   return (
-                    <tr key={s.id} className="transition-colors hover:bg-[#4FAEB2]/5">
-                      <td className="px-5 py-3 text-sm font-semibold text-slate-900">{s.nombre}</td>
+                    <tr
+                      key={s.id}
+                      onClick={() => setSelectedId(s.id)}
+                      aria-selected={isSelected}
+                      title="Ver las tarjetas de este sorteo"
+                      className={`cursor-pointer transition-colors ${
+                        isSelected ? "bg-[#4FAEB2]/10" : "hover:bg-[#4FAEB2]/5"
+                      }`}
+                    >
+                      <td className="px-5 py-3 text-sm font-semibold text-slate-900">
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className={`h-4 w-1 rounded-full ${isSelected ? "bg-[#4FAEB2]" : "bg-transparent"}`}
+                          />
+                          {s.nombre}
+                        </span>
+                      </td>
                       <td className="px-5 py-3">
                         <span
                           className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${meta.chip}`}
@@ -359,7 +417,10 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
                         {s.total_boletos_vendidos}
                       </td>
                       <td className="px-5 py-3 text-right">
-                        <div className="inline-flex items-center justify-end gap-2">
+                        <div
+                          className="inline-flex items-center justify-end gap-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {/* Finalizar: habilitado por tenant (El Papu Store + Mevo). Otros clientes no se tocan. */}
                           {s.estado === "activo" &&
                           ["elpapustore_erp", "mevoerp"].includes(

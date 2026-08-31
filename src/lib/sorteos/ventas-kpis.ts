@@ -240,6 +240,144 @@ async function fetchSorteoLifetimeFromPg(
   return { boletos, monto };
 }
 
+/** KPIs (hoy + acumulado) de UN sorteo, para las tarjetas al seleccionar una fila. */
+export type PerSorteoKpi = {
+  boletosHoy: number;
+  montoHoy: number;
+  boletosSorteo: number;
+  montoSorteo: number;
+};
+/** Mapa sorteo_id → KPIs, para cambiar las tarjetas sin re-consultar al clickear. */
+export type SorteosKpisPorSorteo = Record<string, PerSorteoKpi>;
+
+function ensurePerSorteo(map: SorteosKpisPorSorteo, sid: string): PerSorteoKpi {
+  const existing = map[sid];
+  if (existing) return existing;
+  const fresh: PerSorteoKpi = { boletosHoy: 0, montoHoy: 0, boletosSorteo: 0, montoSorteo: 0 };
+  map[sid] = fresh;
+  return fresh;
+}
+
+async function fetchKpisPorSorteoFromPg(
+  pool: Pool,
+  schema: string,
+  empresaId: string,
+  start: string,
+  end: string
+): Promise<SorteosKpisPorSorteo> {
+  const sch = assertAllowedChatDataSchema(schema);
+  const tent = quoteSchemaTable(sch, "sorteo_entradas");
+  const tcup = quoteSchemaTable(sch, "sorteo_cupones");
+
+  const [bLife, mLife, bDay, mDay] = await Promise.all([
+    pool.query(
+      `SELECT e.sorteo_id AS sid, COUNT(c.id) AS n
+       FROM ${tcup} c INNER JOIN ${tent} e ON e.id = c.entrada_id
+       WHERE e.empresa_id = $1::uuid AND e.estado_pago <> 'rechazado'
+       GROUP BY e.sorteo_id`,
+      [empresaId]
+    ),
+    pool.query(
+      `SELECT e.sorteo_id AS sid, COALESCE(SUM(e.monto_total), 0) AS n
+       FROM ${tent} e
+       WHERE e.empresa_id = $1::uuid AND e.estado_pago <> 'rechazado'
+       GROUP BY e.sorteo_id`,
+      [empresaId]
+    ),
+    pool.query(
+      `SELECT e.sorteo_id AS sid, COUNT(c.id) AS n
+       FROM ${tcup} c INNER JOIN ${tent} e ON e.id = c.entrada_id
+       WHERE e.empresa_id = $1::uuid AND e.created_at >= $2::timestamptz AND e.created_at <= $3::timestamptz
+         AND e.estado_pago <> 'rechazado'
+       GROUP BY e.sorteo_id`,
+      [empresaId, start, end]
+    ),
+    pool.query(
+      `SELECT e.sorteo_id AS sid, COALESCE(SUM(e.monto_total), 0) AS n
+       FROM ${tent} e
+       WHERE e.empresa_id = $1::uuid AND e.created_at >= $2::timestamptz AND e.created_at <= $3::timestamptz
+         AND e.estado_pago <> 'rechazado'
+       GROUP BY e.sorteo_id`,
+      [empresaId, start, end]
+    ),
+  ]);
+
+  const map: SorteosKpisPorSorteo = {};
+  for (const r of bLife.rows as Array<{ sid?: string; n?: string | number }>)
+    if (r.sid) ensurePerSorteo(map, r.sid).boletosSorteo = Number(r.n) || 0;
+  for (const r of mLife.rows as Array<{ sid?: string; n?: string | number }>)
+    if (r.sid) ensurePerSorteo(map, r.sid).montoSorteo = Number(r.n) || 0;
+  for (const r of bDay.rows as Array<{ sid?: string; n?: string | number }>)
+    if (r.sid) ensurePerSorteo(map, r.sid).boletosHoy = Number(r.n) || 0;
+  for (const r of mDay.rows as Array<{ sid?: string; n?: string | number }>)
+    if (r.sid) ensurePerSorteo(map, r.sid).montoHoy = Number(r.n) || 0;
+  return map;
+}
+
+async function fetchKpisPorSorteoFromPostgrest(
+  empresaId: string,
+  day: { start: string; end: string }
+): Promise<SorteosKpisPorSorteo> {
+  const supabase = await getChatServiceClientForEmpresa(empresaId);
+  const res = await supabase
+    .from("sorteo_entradas")
+    .select("sorteo_id, cantidad_boletos, monto_total, estado_pago, created_at")
+    .eq("empresa_id", empresaId);
+  if (res.error) throw res.error;
+  const dayStart = Date.parse(day.start);
+  const dayEnd = Date.parse(day.end);
+  const map: SorteosKpisPorSorteo = {};
+  for (const r of (res.data ?? []) as Array<{
+    sorteo_id?: string | null;
+    cantidad_boletos?: number | null;
+    monto_total?: number | string | null;
+    estado_pago?: string | null;
+    created_at?: string | null;
+  }>) {
+    const sid = (r.sorteo_id ?? "").trim();
+    if (!sid) continue;
+    if ((r.estado_pago ?? "").trim() === "rechazado") continue;
+    const acc = ensurePerSorteo(map, sid);
+    const boletos = Number(r.cantidad_boletos) || 0;
+    const monto = Number(r.monto_total) || 0;
+    acc.boletosSorteo += boletos;
+    acc.montoSorteo += monto;
+    const t = r.created_at ? Date.parse(r.created_at) : NaN;
+    if (Number.isFinite(t) && t >= dayStart && t <= dayEnd) {
+      acc.boletosHoy += boletos;
+      acc.montoHoy += monto;
+    }
+  }
+  return map;
+}
+
+/**
+ * KPIs por sorteo (hoy + acumulado), para que al seleccionar una fila cambien las tarjetas.
+ * Mismo criterio que `getSorteosVentasKpis` pero agrupado por `sorteo_id`.
+ */
+export async function getSorteosVentasKpisPorSorteo(): Promise<SorteosKpisPorSorteo> {
+  const auth = await getUserAndEmpresa(null);
+  if (!auth?.empresa_id) return {};
+  const empresaId = auth.empresa_id;
+  const schema = await fetchDataSchemaForEmpresaId(empresaId);
+  const day = asuncionDayBoundsUtc();
+
+  const pool = getChatPostgresPool();
+  if (pool) {
+    try {
+      return await fetchKpisPorSorteoFromPg(pool, schema, empresaId, day.start, day.end);
+    } catch (e) {
+      logDashboardError(empresaId, schema, e);
+    }
+  }
+  try {
+    return await fetchKpisPorSorteoFromPostgrest(empresaId, day);
+  } catch (e) {
+    logDashboardError(empresaId, schema, e);
+    return {};
+  }
+}
+
 export async function getSorteosVentasKpis(): Promise<SorteosVentasKpis> {
   const empty: SorteosVentasKpis = {
     boletosHoy: 0,
