@@ -127,11 +127,31 @@ function scoreCandidate(
       score += 220;
       flags.push("near_expected");
     } else {
+      /**
+       * Antes: `90 - rel*45`, que a 90% de desvío todavía daba 49 de 90 puntos. El año del
+       * comprobante (2026) le ganaba al importe real solo por "parecerse" a 20.000.
+       * Ahora la cercanía deja de acreditar más allá de REL_MAX_PROX.
+       */
       const rel = d / Math.max(exp, 1);
-      const bonus = Math.max(0, 90 - Math.min(90, rel * 45));
+      const bonus = rel >= REL_MAX_PROX ? 0 : Math.round(90 * (1 - rel / REL_MAX_PROX));
       score += bonus;
       if (bonus > 5) flags.push("prox_expected");
     }
+  }
+
+  /**
+   * "02/09/2026" deja `2026` como candidato de 4 dígitos. Ningún importe se escribe
+   * precedido por `/`, `-` o `.`; si además cae en rango de año, es la fecha.
+   */
+  const prevChar = start > 0 ? fullText[start - 1] : "";
+  const esAnioDeFecha =
+    digits.length === 4 &&
+    value >= 1990 &&
+    value <= 2100 &&
+    (prevChar === "/" || prevChar === "-" || prevChar === ".");
+  if (esAnioDeFecha) {
+    score -= 200;
+    flags.push("year_in_date");
   }
 
   const len = digits.length;
@@ -153,6 +173,8 @@ function scoreCandidate(
 }
 
 const MIN_RELIABLE_SCORE = 12;
+/** Desvío relativo a partir del cual "parecerse al esperado" deja de ser señal. */
+const REL_MAX_PROX = 0.5;
 
 /**
  * Elige el monto OCR más plausible; puede devolver cadena vacía si no hay candidato confiable.
@@ -222,12 +244,23 @@ export function selectReceiptMontoFromOcrText(
     best.flags.includes("near_expected") ||
     best.flags.includes("prox_expected");
 
-  if (best.score < MIN_RELIABLE_SCORE && !hasStrongHint) {
+  /**
+   * Un número elegido solo porque "tiene entre 4 y 8 dígitos" no es evidencia de nada:
+   * es la ruta por la que el año entraba como importe. Sin ninguna otra señal, mejor
+   * no afirmar un monto y dejar que el pipeline mande a revisión manual.
+   */
+  const soloPorLargo =
+    best.flags.length === 0 ||
+    (best.flags.length === 1 && best.flags[0] === "plausible_len");
+
+  if (soloPorLargo || (best.score < MIN_RELIABLE_SCORE && !hasStrongHint)) {
     return {
       monto: "",
       audit: {
         chosen: null,
-        chosen_reason: `below_min_score(${best.score};need_hint)`,
+        chosen_reason: soloPorLargo
+          ? "sin_senal_salvo_largo"
+          : `below_min_score(${best.score};need_hint)`,
         candidates: audits.sort((a, b) => b.score - a.score),
         discarded_bank_match: [...new Set(discarded)],
       },

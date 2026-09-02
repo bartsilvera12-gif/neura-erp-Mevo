@@ -73,7 +73,49 @@ Transferencia enviada Gs. 25.000
   });
   assertEq("100k vs esperado 10k (debe elegir 100k)", parseMontoOcrDigitsToGs(r6.monto), 100000);
 
-  console.log("validate-ocr-monto-selection: OK (6 casos)");
+  /**
+   * Regresión real (Mevo, 02/09/2026): el año de la fecha ganaba como importe.
+   * El OCR solo llegaba a leer la cuenta destino y la fecha; `2026` se llevaba
+   * puntos por "parecerse" a 20.000 y por tener 4 dígitos, y el sistema rechazaba
+   * a gente que había pagado bien con `monto_incoherente`.
+   */
+  const bankMevo = { titular: "Marcos Valdez", numero_cuenta: "3914063", alias: "0994350953" };
+  const ocrAnio = `
+Comprobante de transferencia
+Fecha 02/09/2026
+Cuenta destino 3914063
+`;
+  for (const esperado of [20000, 10000, 5000]) {
+    const rA = selectReceiptMontoFromOcrText(ocrAnio, {
+      expectedMontoGs: esperado,
+      toleranciaAbsolutaGs: 0,
+      datosBancariosEsperados: bankMevo,
+    });
+    assertEq(`año de fecha no es monto (esperado ${esperado})`, rA.monto, "");
+  }
+
+  /** Con el importe legible, se sigue eligiendo bien aunque el año esté presente. */
+  const ocrAnioConMonto = `
+Comprobante de transferencia
+Fecha 02/09/2026
+Cuenta destino 3914063
+Monto Gs. 20.000
+`;
+  const rB = selectReceiptMontoFromOcrText(ocrAnioConMonto, {
+    expectedMontoGs: 20000,
+    toleranciaAbsolutaGs: 0,
+    datosBancariosEsperados: bankMevo,
+  });
+  assertEq("año presente pero monto legible", parseMontoOcrDigitsToGs(rB.monto), 20000);
+
+  /** Un número suelto de 4-8 dígitos, sin moneda ni etiqueta, no alcanza para afirmar un monto. */
+  const rC = selectReceiptMontoFromOcrText("Operacion exitosa\n48213", {
+    expectedMontoGs: 20000,
+    datosBancariosEsperados: { titular: "", numero_cuenta: "", alias: "" },
+  });
+  assertEq("numero suelto sin señal → sin monto", rC.monto, "");
+
+  console.log("validate-ocr-monto-selection: OK (11 casos)");
 }
 
 run();
