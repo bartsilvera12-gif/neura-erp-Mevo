@@ -176,8 +176,9 @@ export function buildSorteoTicketSvg(input: SorteoTicketRenderInput): string {
     const href = dataUrlFromBuffer(input.logoBytes, input.logoMime);
     marca = `<image href="${href}" x="${M}" y="${yMarca - 52}" width="190" height="64" preserveAspectRatio="xMinYMid meet"/>`;
   } else if (showLogo) {
+    /** Mismo texto y misma fuente de datos que el diseño anterior; solo cambia la forma. */
     marca = svgTextAsPath({
-      text: (input.empresaNombre || "mevo").trim().toLowerCase(),
+      text: (input.empresaNombre || "").trim(),
       x: M,
       y: yMarca,
       fontSize: 52,
