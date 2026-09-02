@@ -148,6 +148,67 @@ function parseOutgoingImageMessage(message: ChatMessage): { url: string | null; 
   return { url: urlLine, caption: captionLine };
 }
 
+/**
+ * El ticket de sorteo se envía con una URL firmada de 600 s que no queda guardada
+ * en el mensaje, así que el inbox no tiene nada que mostrar. Este botón pide una
+ * URL nueva al servidor en el momento de abrirlo.
+ */
+function TicketSorteoPreview({
+  messageId,
+  onOpen,
+  fromMe,
+}: {
+  messageId: string;
+  onOpen: (url: string) => void;
+  fromMe: boolean;
+}) {
+  const [estado, setEstado] = useState<"idle" | "cargando" | "error">("idle");
+  const [detalle, setDetalle] = useState<string>("");
+
+  async function abrir() {
+    setEstado("cargando");
+    setDetalle("");
+    try {
+      const res = await fetchWithSupabaseSession(
+        `/api/sorteos/tickets/by-message/${messageId}/signed-url`,
+        { credentials: "include", cache: "no-store" }
+      );
+      const json = (await res.json()) as { data?: { url?: string }; error?: string };
+      const url = json?.data?.url;
+      if (!res.ok || !url) {
+        setEstado("error");
+        setDetalle(json?.error ?? `Error ${res.status}`);
+        return;
+      }
+      setEstado("idle");
+      onOpen(url);
+    } catch (e) {
+      setEstado("error");
+      setDetalle(e instanceof Error ? e.message : "Error de red");
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={abrir}
+        disabled={estado === "cargando"}
+        className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-60 ${
+          fromMe
+            ? "bg-white/20 text-white hover:bg-white/30"
+            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+        }`}
+      >
+        {estado === "cargando" ? "Abriendo…" : "Ver ticket"}
+      </button>
+      {estado === "error" ? (
+        <p className={`text-[11px] ${fromMe ? "text-white/80" : "text-rose-600"}`}>{detalle}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function resolveAttachmentUrl(message: ChatMessage): string | null {
   return (
     getErpAttachmentPublicUrl(message.raw_payload) ??
@@ -2944,6 +3005,13 @@ export function ConversacionesClient({
                                   ) : null}
                                   {parsed.caption ? (
                                     <p className="whitespace-pre-wrap break-words">{parsed.caption}</p>
+                                  ) : null}
+                                  {!parsed.url ? (
+                                    <TicketSorteoPreview
+                                      messageId={m.id}
+                                      fromMe={m.from_me}
+                                      onOpen={(u) => setLightboxUrl(u)}
+                                    />
                                   ) : null}
                                   {!parsed.url && !parsed.caption ? (
                                     <p className="whitespace-pre-wrap break-words">{m.content}</p>
