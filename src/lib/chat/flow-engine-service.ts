@@ -1324,6 +1324,28 @@ export function createFlowEngine(ctx: FlowEngineContext) {
   }
 
   /**
+   * Identidad del participante: NUNCA se hereda de sesiones anteriores ni del perfil
+   * de WhatsApp. En un teléfono compartido (familia, revendedor) eso hacía que la orden
+   * se guardara a nombre del comprador anterior — el ticket sale con la persona equivocada.
+   */
+  const SORTEO_IDENTIDAD_KEYS: ReadonlySet<string> = new Set([
+    "nombre",
+    "apellido",
+    "nombre_completo",
+    "nombre_y_apellido",
+    "primer_nombre",
+    "primer_apellido",
+    "cliente_nombre",
+    "participante",
+    "cedula",
+    "documento",
+    "nro_documento",
+    "numero_documento",
+    "ci",
+    "cliente_documento",
+  ]);
+
+  /**
    * Último valor no vacío por `field_name` en toda la conversación+mismo flujo (todas las sesiones).
    * Recorre filas por `created_at` descendente: la primera fila no vacía por clave gana (más reciente).
    */
@@ -1350,6 +1372,8 @@ export function createFlowEngine(ctx: FlowEngineContext) {
       if (!key) continue;
       // No mezclar metadatos del comprobante de otro envío; el pipeline actual los define.
       if (key.startsWith("sorteo_comprobante_")) continue;
+      // Ni la identidad: pertenece al participante de ESTA sesión, no al de la anterior.
+      if (SORTEO_IDENTIDAD_KEYS.has(key)) continue;
       const val = String((row as { field_value?: string }).field_value ?? "").trim();
       if (!val || !slotEmpty(key)) continue;
       merged[key] = val;
@@ -1358,7 +1382,13 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     return { merged, filledKeys };
   }
 
-  /** Si el flujo no tiene nombre guardado, usar nombre del contacto WhatsApp (chat_contacts). */
+  /**
+   * Antes: si el flujo no tenía nombre, se usaba el del perfil de WhatsApp como
+   * identidad del participante. Eso produjo entradas llamadas "Jr" o "Ñanñan Ñannnn"
+   * y, en teléfonos compartidos, el nombre del dueño del celular en vez del comprador.
+   * Ahora el nombre del contacto se guarda aparte (`nombre_sugerido`) y NO alimenta la
+   * orden: si falta la identidad real, la compra no debe cerrarse.
+   */
   async function hydrateSorteoFlowDataFromChatContact(
     empresaId: string,
     contactId: string | null | undefined,
@@ -1382,14 +1412,7 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     const nm = String((data as { name?: string | null }).name ?? "").trim();
     if (!nm) return base;
     const out: Record<string, string> = { ...base };
-    const parts = nm.split(/\s+/).filter(Boolean);
-    if (!String(out.nombre_completo ?? "").trim()) out.nombre_completo = nm;
-    if (!String(out.nombre ?? "").trim()) {
-      out.nombre = parts.length >= 2 ? parts[0] : nm;
-    }
-    if (parts.length >= 2 && !String(out.apellido ?? "").trim()) {
-      out.apellido = parts.slice(1).join(" ");
-    }
+    out.nombre_sugerido = nm;
     return out;
   }
 
