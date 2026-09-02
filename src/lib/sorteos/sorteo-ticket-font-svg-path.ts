@@ -63,6 +63,28 @@ function escAttr(s: string): string {
 /**
  * Devuelve `<path …/>` o cadena vacía. `y` = línea base (como `<text y>` en SVG).
  */
+/** Ancho en px de un texto con la fuente/peso/tracking dados (para encajar o alinear). */
+export function measureTicketText(opts: {
+  text: string;
+  fontSize: number;
+  weight: number;
+  letterSpacing?: number;
+}): number {
+  const t = opts.text.replace(/\s+/g, " ").trim();
+  if (!t) return 0;
+  try {
+    const font = getSorteoInterFont(opts.weight);
+    const scale = opts.fontSize / font.unitsPerEm;
+    const run = font.layout(t);
+    let adv = 0;
+    for (const pos of run.positions) adv += pos.xAdvance;
+    const ls = opts.letterSpacing ?? 0;
+    return adv * scale + ls * Math.max(0, run.glyphs.length - 1);
+  } catch {
+    return 0;
+  }
+}
+
 export function svgTextAsPath(opts: {
   text: string;
   x: number;
@@ -70,7 +92,9 @@ export function svgTextAsPath(opts: {
   fontSize: number;
   weight: number;
   fill: string;
-  textAnchor?: "start" | "middle";
+  textAnchor?: "start" | "middle" | "end";
+  /** Tracking en px; se reparte entre glifos (para versalitas del comprobante). */
+  letterSpacing?: number;
 }): string {
   const t = opts.text.replace(/\s+/g, " ").trim();
   if (!t) return "";
@@ -80,14 +104,21 @@ export function svgTextAsPath(opts: {
     const scale = fontSize / font.unitsPerEm;
     const run = font.layout(t);
 
+    const ls = opts.letterSpacing ?? 0;
+    /** El tracking va en px de pantalla; se convierte a unidades de fuente. */
+    const lsUnits = scale > 0 ? ls / scale : 0;
+
     let totalAdv = 0;
     for (const pos of run.positions) {
       totalAdv += pos.xAdvance;
     }
+    totalAdv += lsUnits * Math.max(0, run.glyphs.length - 1);
 
     let startX = opts.x;
     if (opts.textAnchor === "middle") {
       startX = opts.x - (totalAdv * scale) / 2;
+    } else if (opts.textAnchor === "end") {
+      startX = opts.x - totalAdv * scale;
     }
 
     let xPen = 0;
@@ -100,7 +131,7 @@ export function svgTextAsPath(opts: {
         .transform(scale, 0, 0, -scale, startX, opts.y)
         .toSVG();
       if (fragment) dParts.push(fragment);
-      xPen += pos.xAdvance;
+      xPen += pos.xAdvance + lsUnits;
     }
 
     const dCombined = dParts.join(" ");
