@@ -1667,8 +1667,17 @@ export async function processInboundWebhookValue(
           }
           // FIX: botón de "comprar de nuevo" que no es opción del nodo actual (p. ej. en
           // compra_realizada). En vez de quedar como invalid_button, reiniciamos una compra nueva.
+          //
+          // `!messageAlreadyExists` es imprescindible: los clics interactivos se reprocesan a
+          // proposito en cada reintento de Meta (ver `mustRetryInboundRoutingDespiteDedupe`).
+          // En el reintento el flujo YA avanzo, el boton deja de ser opcion del nodo actual, y
+          // como su etiqueta dice "3 BOLETAS → 20.000" matchea la intencion de compra: el flujo
+          // se reiniciaba a la bienvenida. Medido en mevoerp: 26 sesiones en 25 minutos para un
+          // solo cliente, y >30 clientes con 18-62 reinicios en una semana (~5 mensajes cada uno).
+          // Solo el PRIMER procesamiento de un interactivo puede disparar reinicio.
           if (
             interactiveResult.status === "invalid_button_restart_intent" &&
+            !messageAlreadyExists &&
             !restartedThisMessage &&
             !convHuman &&
             convFlowStatus !== "human"
