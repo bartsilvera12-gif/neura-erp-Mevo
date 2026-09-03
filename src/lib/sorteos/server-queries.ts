@@ -201,6 +201,13 @@ function buildEntradaWhereParts(
     conds.push(`${a}estado_pago = $${i}::text`);
     params.push(p.estadoPago);
     i++;
+  } else {
+    /**
+     * Sin filtro explícito NO se listan las órdenes rechazadas: de acá sale el padrón
+     * que se usa para sortear, y una orden anulada no debe volver a aparecer solo
+     * porque nadie tocó el filtro. Para verlas, elegir "rechazado" en la pantalla.
+     */
+    conds.push(`${a}estado_pago <> 'rechazado'`);
   }
 
   return { sql: conds.join(" AND "), params, nextIdx: i };
@@ -502,7 +509,9 @@ async function fetchSorteoEntradasPostgrest(
   let qb = sb.from("sorteo_entradas").select("*", { count: "exact" }).eq("empresa_id", empresaId);
 
   if (listParams.sorteoId) qb = qb.eq("sorteo_id", listParams.sorteoId);
+  /** Sin filtro explícito, las rechazadas quedan fuera del listado (ver buildEntradaWhereParts). */
   if (listParams.estadoPago) qb = qb.eq("estado_pago", listParams.estadoPago);
+  else qb = qb.neq("estado_pago", "rechazado");
   if (listParams.q && listParams.q.length > 0) {
     const t = `%${listParams.q}%`;
     qb = qb.or(`nombre_participante.ilike.${t},documento.ilike.${t},whatsapp_numero.ilike.${t}`);
@@ -653,7 +662,9 @@ async function fetchSorteoCuponesOrdenesPostgrest(
     .eq("empresa_id", empresaId);
 
   if (listParams.sorteoId) qb = qb.eq("sorteo_id", listParams.sorteoId);
+  /** Sin filtro explícito, las rechazadas quedan fuera del listado (ver buildEntradaWhereParts). */
   if (listParams.estadoPago) qb = qb.eq("estado_pago", listParams.estadoPago);
+  else qb = qb.neq("estado_pago", "rechazado");
   if (listParams.q && listParams.q.length > 0) {
     // Vista «Cupones»: buscar SOLO por número de cupón (recurso embebido, join inner).
     const t = `%${listParams.q}%`;
