@@ -102,6 +102,8 @@ export default function CampanasDetailClient({
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Nombre del archivo Excel/CSV elegido, para mostrarlo junto al botón de subida. */
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   /** Estado de carga específico del botón de validación (spinner + deshabilitado). */
   const [validating, setValidating] = useState(false);
   /** Resultado visible de la última validación: éxito (ready) o error con motivo concreto. */
@@ -678,16 +680,80 @@ export default function CampanasDetailClient({
             Importación (.xlsx / .csv)
           </h2>
         </div>
-        <input
-          type="file"
-          accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          disabled={!canImport || busy}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void uploadFile(f);
-          }}
-          className="block text-sm text-slate-600"
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <label
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-sm transition-colors ${
+              !canImport || busy
+                ? "cursor-not-allowed bg-slate-200 text-slate-400"
+                : "cursor-pointer bg-[#4FAEB2] text-white shadow-[#4FAEB2]/25 hover:bg-[#3F8E91]"
+            }`}
+          >
+            {busy ? (
+              <>
+                <span
+                  aria-hidden="true"
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                />
+                Subiendo…
+              </>
+            ) : (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4"
+                  aria-hidden="true"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                Subir archivo Excel
+              </>
+            )}
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              disabled={!canImport || busy}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) {
+                  setSelectedFileName(f.name);
+                  void uploadFile(f);
+                }
+                // Reset para poder re-elegir el mismo archivo si hace falta.
+                e.target.value = "";
+              }}
+              className="hidden"
+            />
+          </label>
+          {selectedFileName ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-slate-600">
+              <span className={busy ? "text-[#4FAEB2]" : "text-emerald-600"}>
+                {busy ? "Procesando" : "✓ Cargado"}:
+              </span>
+              <strong className="truncate font-medium text-slate-800" title={selectedFileName}>
+                {selectedFileName}
+              </strong>
+            </span>
+          ) : (
+            <span className="text-xs text-slate-400">Ningún archivo seleccionado</span>
+          )}
+        </div>
+        {busy ? (
+          <div
+            className="h-1.5 w-full overflow-hidden rounded-full bg-[#4FAEB2]/15"
+            role="progressbar"
+            aria-label="Subiendo archivo"
+          >
+            <div className="h-full w-full animate-pulse rounded-full bg-gradient-to-r from-[#4FAEB2]/60 via-[#4FAEB2] to-[#4FAEB2]/60" />
+          </div>
+        ) : null}
         <p className="text-xs text-slate-500">Máximo 5.000 filas / 5 MB.</p>
         {templateHasHeaderImage ? (
           <p className="text-xs text-slate-600">
