@@ -91,6 +91,17 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
         ? "La plantilla tiene variables: definí el mapeo desde cada {{variable}} hacia una columna del Excel."
         : missingMappingSlots.map(formatMissingMappingMessage).join(" ");
 
+    // Agrupa por payload idéntico y aplica UPDATE ... IN (...) por grupo, en vez de una
+    // UPDATE por destinatario (1000 filas hacían 1000 round-trips → "Validando…" eterno).
+    // Caso típico (plantilla sin variables): todos comparten payload → una sola operación.
+    const updateGroups = new Map<string, { payload: Record<string, unknown>; ids: string[] }>();
+    const queueUpdate = (payload: Record<string, unknown>, id: string) => {
+      const key = JSON.stringify(payload);
+      const g = updateGroups.get(key);
+      if (g) g.ids.push(id);
+      else updateGroups.set(key, { payload, ids: [id] });
+    };
+
     for (const rec of recipients ?? []) {
       const row = rec as {
         id: string;
@@ -101,16 +112,15 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
 
       if (mappingDefinitionIncomplete) {
         mappingErrors += 1;
-        await sb
-          .from("chat_campaign_recipients")
-          .update({
+        queueUpdate(
+          {
             status: "pending",
             mapped_variables_json: {},
             validation_error: mappingDefinitionMessage || "Mapeo de variables incompleto",
             updated_at: ts,
-          })
-          .eq("id", row.id)
-          .eq("empresa_id", auth.empresaId);
+          },
+          row.id
+        );
         continue;
       }
 
@@ -123,29 +133,43 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
         mappingErrors += 1;
         const emptySlots = listSlotsWithEmptyMappedValues(mapped, tplComponents as unknown[]);
         const errMsg = emptySlots.map(formatMissingValueMessage).join(" ");
-        await sb
-          .from("chat_campaign_recipients")
-          .update({
+        queueUpdate(
+          {
             status: "pending",
             mapped_variables_json: mapped,
             validation_error: errMsg || "Faltan variables de plantilla",
             updated_at: ts,
-          })
-          .eq("id", row.id)
-          .eq("empresa_id", auth.empresaId);
+          },
+          row.id
+        );
         continue;
       }
 
-      await sb
-        .from("chat_campaign_recipients")
-        .update({
+      queueUpdate(
+        {
           mapped_variables_json: mapped,
           validation_error: null,
           status: "pending",
           updated_at: ts,
-        })
-        .eq("id", row.id)
-        .eq("empresa_id", auth.empresaId);
+        },
+        row.id
+      );
+    }
+
+    // Aplica los updates en lote: por grupo, en chunks de ids.
+    const ID_CHUNK = 500;
+    for (const g of updateGroups.values()) {
+      for (let i = 0; i < g.ids.length; i += ID_CHUNK) {
+        const idsChunk = g.ids.slice(i, i + ID_CHUNK);
+        const { error: uErr } = await sb
+          .from("chat_campaign_recipients")
+          .update(g.payload)
+          .in("id", idsChunk)
+          .eq("empresa_id", auth.empresaId);
+        if (uErr) {
+          return NextResponse.json(errorResponse(uErr.message), { status: 400 });
+        }
+      }
     }
 
     const headerResolution = resolveHeaderImageUrlForCampaign({
