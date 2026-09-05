@@ -100,6 +100,10 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
 
     const ts = new Date().toISOString();
 
+    // Se arman todas las filas en memoria y se insertan en lote (chunks) para evitar
+    // 1000 round-trips secuenciales a la base, que hacían timeout la importación.
+    const rowsToInsert: Record<string, unknown>[] = [];
+
     for (const row of parsed.rows) {
       rowNum += 1;
       const rawPhone = row[phoneCol] ?? "";
@@ -146,7 +150,14 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
         insertRow.phone_e164 = `invalid_${rowNum}_${campaignId.slice(0, 8)}`;
       }
 
-      const { error: insErr } = await sb.from("chat_campaign_recipients").insert(insertRow);
+      rowsToInsert.push(insertRow);
+    }
+
+    // Inserción en lote por chunks (rápida y sin timeout).
+    const INSERT_CHUNK = 500;
+    for (let i = 0; i < rowsToInsert.length; i += INSERT_CHUNK) {
+      const chunk = rowsToInsert.slice(i, i + INSERT_CHUNK);
+      const { error: insErr } = await sb.from("chat_campaign_recipients").insert(chunk);
       if (insErr) {
         return NextResponse.json(errorResponse(insErr.message), { status: 400 });
       }
