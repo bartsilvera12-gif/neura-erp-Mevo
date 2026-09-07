@@ -29,7 +29,7 @@ export type SelectReceiptMontoFromOcrOptions = {
 const POS_LINE =
   /monto|total|importe|pagad[oa]|transferencia|enviad[oa]|env[ií]o|acreditad[oa]|d[eé]bito|pago|valor/i;
 const NEG_LINE =
-  /cuenta|nro\.?\s*cuenta|n[uú]mero\s+de\s+cuenta|cta\.?|alias|titular|\bruc\b|\bci\b|c[eé]dula|documento|operaci[oó]n|transacci[oó]n|referencia|tel[eé]fono|celular/i;
+  /cuenta|nro\.?\s*cuenta|n[uú]mero\s+de\s+cuenta|cta\.?|alias|titular|\bruc\b|\bci\b|c[eé]dula|documento|operaci[oó]n|transacci[oó]n|referencia|tel[eé]fono|celular|comprobante|orden\s+n|\bnro\.?\s*(?:de\s+)?comprobante\b|boleta/i;
 
 /** Ventana alrededor del match para detectar prefijo monetario */
 function currencyNearFullText(text: string, start: number, end: number): boolean {
