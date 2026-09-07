@@ -38,6 +38,8 @@ export interface ComprobanteValidationMessages {
   datos_bancarios_incoherentes: string;
   boton_otro_titulo: string;
   boton_asesor_titulo: string;
+  /** Solo aparece cuando el rechazo es por monto que no coincide con el combo. */
+  boton_cambiar_combo_titulo: string;
 }
 
 /** Datos bancarios esperados en el canal (no se leen del flujo). */
@@ -93,6 +95,14 @@ export interface ComprobanteValidationSettings {
 export const COMPROBANTE_BUTTON_IDS = {
   enviar_otro: "cmp_enviar_otro",
   hablar_asesor: "cmp_hablar_asesor",
+  /**
+   * Solo se emite en `monto_incoherente`. La etiqueta debe contener una palabra
+   * clave de intencion de compra (ver flow-restart-intent DEFAULT_SOFT_KEYWORDS)
+   * para que, al ser un boton "invalido" para el nodo actual, el webhook lo trate
+   * como reinicio de compra en lugar de dejarlo como invalid_button. No hay
+   * handler dedicado: reutiliza `invalid_button_restart_intent`.
+   */
+  cambiar_combo: "cmp_cambiar_combo",
 } as const;
 
 /** Claves en `chat_flow_data` (por flow_session_id). */
@@ -159,6 +169,7 @@ export const DEFAULT_COMPROBANTE_VALIDATION_MESSAGES: ComprobanteValidationMessa
     "El comprobante no coincide con los datos bancarios esperados. Podés reenviar el comprobante o hablar con un asesor.",
   boton_otro_titulo: "Otro comprobante",
   boton_asesor_titulo: "Hablar con asesor",
+  boton_cambiar_combo_titulo: "Otra boleta",
 };
 
 function defaultOcrFieldRule(partial: Partial<OcrFieldRule> = {}): OcrFieldRule {
@@ -265,6 +276,10 @@ export function parseComprobanteValidationConfig(config: unknown): ComprobanteVa
       typeof messages.boton_otro_titulo === "string" && messages.boton_otro_titulo.trim()
         ? messages.boton_otro_titulo.trim().slice(0, 20)
         : base.messages.boton_otro_titulo,
+    boton_cambiar_combo_titulo:
+      typeof messages.boton_cambiar_combo_titulo === "string" && messages.boton_cambiar_combo_titulo.trim()
+        ? messages.boton_cambiar_combo_titulo.trim().slice(0, 20)
+        : base.messages.boton_cambiar_combo_titulo,
     boton_asesor_titulo:
       typeof messages.boton_asesor_titulo === "string" && messages.boton_asesor_titulo.trim()
         ? messages.boton_asesor_titulo.trim().slice(0, 20)
