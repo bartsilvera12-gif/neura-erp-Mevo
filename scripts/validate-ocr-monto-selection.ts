@@ -115,7 +115,44 @@ Monto Gs. 20.000
   });
   assertEq("numero suelto sin señal → sin monto", rC.monto, "");
 
-  console.log("validate-ocr-monto-selection: OK (11 casos)");
+  /**
+   * Regresión real (Mevo, 07/09/2026): "Nro. de comprobante: 8985501" y variantes.
+   * El OCR tomaba el número de comprobante como monto (7 dígitos con "currency"
+   * cercano por venir del texto de un comprobante bancario). Fix: `comprobante`
+   * y `boleta` en NEG_LINE.
+   */
+  const casos = [
+    {
+      texto: "ueno bank\nComprobante de transferencia\nNro. de comprobante: 8985501\n07/09/2026 a las 14:30\nGs. 20.000\nTransferencia exitosa\nDE: JAZMIN QUINTANA\nPARA Marcos Valdez\nNro. 3914063",
+      esperado: 20000,
+      label: "Nro. comprobante 8985501",
+    },
+    {
+      texto: "ueno bank\nComprobante de transferencia\nNro. de comprobante: 2243947\n07/09/2026 a las 12:33\nGs. 20.000\nTransferencia exitosa",
+      esperado: 20000,
+      label: "Nro. comprobante 2243947",
+    },
+    {
+      texto: "Comprobante de transferencia\nNro. de comprobante: 2275643\nGs. 10.000\nTransferencia exitosa",
+      esperado: 10000,
+      label: "Nro. comprobante 2275643",
+    },
+    {
+      texto: "Comprobante de transferencia\nNro. de comprobante: 8985511\nGs. 20.000\nTransferencia exitosa",
+      esperado: 20000,
+      label: "Nro. comprobante 8985511",
+    },
+  ];
+  for (const c of casos) {
+    const r = selectReceiptMontoFromOcrText(c.texto, {
+      expectedMontoGs: c.esperado,
+      toleranciaAbsolutaGs: 0,
+      datosBancariosEsperados: { titular: "", numero_cuenta: "", alias: "" },
+    });
+    assertEq(`${c.label} — no confunde nro comprobante con monto`, parseMontoOcrDigitsToGs(r.monto), c.esperado);
+  }
+
+  console.log("validate-ocr-monto-selection: OK (15 casos)");
 }
 
 run();
