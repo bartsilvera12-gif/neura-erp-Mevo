@@ -879,8 +879,22 @@ export async function runComprobanteValidationPipeline(ctx: PipelineCtx): Promis
       advance: false,
       sendInteractive: {
         body: settings.messages.monto_incoherente,
+        /**
+         * Tercer boton "Otra boleta": el cliente eligio un combo (p.ej. 20.000) pero
+         * transfirio otro monto (p.ej. 10.000). En vez de rechazar y punto, se ofrece
+         * reelegir combo. La etiqueta "Otra boleta" matchea la keyword del detector de
+         * intencion de compra en flow-restart-intent (DEFAULT_SOFT_KEYWORDS); asi cae en
+         * `invalid_button_restart_intent` y el webhook reinicia el flujo desde el inicio
+         * para que el cliente elija un combo acorde a lo que efectivamente pago.
+         *
+         * WhatsApp permite maximo 3 botones interactivos.
+         */
         buttons: [
           { id: COMPROBANTE_BUTTON_IDS.enviar_otro, title: settings.messages.boton_otro_titulo.slice(0, 20) },
+          {
+            id: COMPROBANTE_BUTTON_IDS.cambiar_combo,
+            title: settings.messages.boton_cambiar_combo_titulo.slice(0, 20),
+          },
           {
             id: COMPROBANTE_BUTTON_IDS.hablar_asesor,
             title: settings.messages.boton_asesor_titulo.slice(0, 20),
