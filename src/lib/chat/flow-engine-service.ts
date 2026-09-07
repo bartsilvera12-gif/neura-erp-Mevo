@@ -2274,6 +2274,158 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     );
     if (
       currentNodePre?.node_type === "image_input" &&
+      params.metaButtonId === COMPROBANTE_BUTTON_IDS.cambiar_combo
+    ) {
+      const sendCtxCc = await getConversationSendContext(state.id);
+      const { data: chCfgCc } = await supabase
+        .from("chat_channels")
+        .select("config")
+        .eq("id", state.channel_id)
+        .maybeSingle();
+      const cvMsgsCc = parseComprobanteValidationConfig(chCfgCc?.config).messages;
+      const sidCc = (state.active_flow_session_id ?? "").trim();
+      const { data: lastValRow } = await supabase
+        .from("chat_comprobante_validaciones")
+        .select("id, monto_validacion_ocr_gs, monto_validacion_esperado_gs")
+        .eq("empresa_id", state.empresa_id)
+        .eq("conversation_id", state.id)
+        .eq("flow_session_id", sidCc)
+        .eq("estado_validacion", "monto_incoherente")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const detectedGs =
+        typeof lastValRow?.monto_validacion_ocr_gs === "number"
+          ? lastValRow.monto_validacion_ocr_gs
+          : null;
+
+      const { data: opts } = await supabase
+        .from("chat_flow_options")
+        .select("option_payload, label")
+        .eq("empresa_id", state.empresa_id)
+        .eq("flow_code", state.flow_code);
+      const montoKeysLower = new Set([
+        "monto",
+        "monto_compra",
+        "monto_promocional",
+        "sorteo_monto_opcion",
+      ]);
+      const montosCombo = new Set<number>();
+      for (const o of (opts ?? []) as Array<{ option_payload: unknown; label?: string | null }>) {
+        const pl = (o.option_payload ?? {}) as Record<string, unknown>;
+        for (const [k, v] of Object.entries(pl)) {
+          if (!montoKeysLower.has(k.trim().toLowerCase())) continue;
+          const digits = String(v ?? "").replace(/\D/g, "");
+          if (!digits) continue;
+          const n = Number(digits);
+          if (Number.isFinite(n) && n > 0) montosCombo.add(Math.round(n));
+        }
+      }
+
+      const matchOk = detectedGs != null && montosCombo.has(detectedGs);
+
+      if (!matchOk) {
+        const disponibles = [...montosCombo].sort((a, b) => a - b);
+        const listado = disponibles.length
+          ? disponibles.map((m) => `Gs. ${m.toLocaleString("es-PY")}`).join(", ")
+          : "";
+        const body = detectedGs != null
+          ? `El monto de tu comprobante (Gs. ${detectedGs.toLocaleString("es-PY")}) no coincide con ninguno de nuestros paquetes${listado ? ` (${listado})` : ""}. Enviá otro comprobante o hablá con un asesor.`
+          : `No pudimos leer el monto de tu comprobante. Enviá otro comprobante o hablá con un asesor.`;
+        if (sendCtxCc.provider === "meta") {
+          const ibCc = await sendWhatsAppInteractiveButtons({
+            toDigits: sendCtxCc.toDigits,
+            phoneNumberId: sendCtxCc.phoneNumberId,
+            accessToken: sendCtxCc.token,
+            bodyText: body,
+            buttons: [
+              { id: COMPROBANTE_BUTTON_IDS.enviar_otro, title: cvMsgsCc.boton_otro_titulo.slice(0, 20) },
+              { id: COMPROBANTE_BUTTON_IDS.hablar_asesor, title: cvMsgsCc.boton_asesor_titulo.slice(0, 20) },
+            ],
+          });
+          if (ibCc.ok) {
+            await persistOutgoingMessage({
+              conversation: state,
+              content: body,
+              messageType: "interactive",
+              waMessageId: ibCc.waMessageId,
+              raw: ibCc.raw,
+              senderType: "system",
+              automationSource: "flow_engine",
+              neuraInteractive: {
+                kind: "buttons",
+                groupTitle: body,
+                items: [
+                  { id: COMPROBANTE_BUTTON_IDS.enviar_otro, title: cvMsgsCc.boton_otro_titulo.slice(0, 20), payload: null },
+                  { id: COMPROBANTE_BUTTON_IDS.hablar_asesor, title: cvMsgsCc.boton_asesor_titulo.slice(0, 20), payload: null },
+                ],
+              },
+            });
+          }
+        }
+        await insertFlowEvent({
+          empresaId: state.empresa_id,
+          conversationId: state.id,
+          flowCode: state.flow_code,
+          nodeCode: state.flow_current_node,
+          flowSessionId: state.active_flow_session_id,
+          eventType: "comprobante_cambiar_combo_no_match",
+          metaButtonId: params.metaButtonId,
+          payload: {
+            monto_detectado_gs: detectedGs,
+            montos_combo_disponibles: [...montosCombo],
+          },
+        });
+        return { ok: true, status: "comprobante_cambiar_combo_no_match" };
+      }
+
+      const nuevoMontoStr = String(detectedGs);
+      const upsertRows = ["monto", "monto_compra", "monto_promocional", "sorteo_monto_opcion"].map(
+        (fn) => ({
+          empresa_id: state.empresa_id,
+          conversation_id: state.id,
+          flow_code: state.flow_code as string,
+          flow_session_id: sidCc,
+          field_name: fn,
+          field_value: nuevoMontoStr,
+        })
+      );
+      await supabase
+        .from("chat_flow_data")
+        .upsert(upsertRows, { onConflict: "flow_session_id,field_name" });
+
+      const body = `Cambiamos tu paquete a Gs. ${detectedGs.toLocaleString("es-PY")}. Por favor, reenviá el mismo comprobante para confirmar la compra.`;
+      const stCc = await flowSendText(sendCtxCc, body);
+      if (stCc.ok) {
+        await persistOutgoingMessage({
+          conversation: state,
+          content: body,
+          messageType: "text",
+          waMessageId: stCc.waMessageId,
+          raw: stCc.raw,
+          senderType: "system",
+          automationSource: "flow_engine",
+        });
+      }
+      await insertFlowEvent({
+        empresaId: state.empresa_id,
+        conversationId: state.id,
+        flowCode: state.flow_code,
+        nodeCode: state.flow_current_node,
+        flowSessionId: state.active_flow_session_id,
+        eventType: "comprobante_cambiar_combo_aplicado",
+        metaButtonId: params.metaButtonId,
+        payload: {
+          monto_anterior_esperado_gs: lastValRow?.monto_validacion_esperado_gs ?? null,
+          monto_nuevo_esperado_gs: detectedGs,
+          validation_id_previa: lastValRow?.id ?? null,
+        },
+      });
+      return { ok: true, status: "comprobante_cambiar_combo_aplicado" };
+    }
+
+    if (
+      currentNodePre?.node_type === "image_input" &&
       (params.metaButtonId === COMPROBANTE_BUTTON_IDS.enviar_otro ||
         params.metaButtonId === COMPROBANTE_BUTTON_IDS.hablar_asesor)
     ) {
