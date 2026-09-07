@@ -666,7 +666,15 @@ export function ConversacionesClient({
           error: e instanceof Error ? e.message : String(e),
           filters: filters ?? null,
         });
-        setListError(e instanceof Error ? e.message : "Error al cargar conversaciones");
+        // Un refresco de fondo que falla (hipo de red/DB) NO debe romper la vista con el
+        // error crudo del servidor: si ya hay conversaciones o es un refresco silencioso,
+        // se conserva lo anterior y el próximo poll reintenta. Solo se avisa —de forma
+        // amable y sin filtrar el mensaje interno— cuando no hay nada que mostrar.
+        if (silent || previousCount > 0) {
+          setListError(null);
+        } else {
+          setListError("No pudimos cargar el listado ahora. Reintentando…");
+        }
       } finally {
         if (!silent) {
           setLoadingList(false);
