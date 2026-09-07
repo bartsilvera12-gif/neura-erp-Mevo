@@ -2299,11 +2299,20 @@ export function createFlowEngine(ctx: FlowEngineContext) {
           ? lastValRow.monto_validacion_ocr_gs
           : null;
 
-      const { data: opts } = await supabase
-        .from("chat_flow_options")
-        .select("option_payload, label")
+      const { data: nodesForCombos } = await supabase
+        .from("chat_flow_nodes")
+        .select("id")
         .eq("empresa_id", state.empresa_id)
         .eq("flow_code", state.flow_code);
+      const nodeIds = (nodesForCombos ?? [])
+        .map((n) => (n as { id?: string })?.id)
+        .filter((v): v is string => typeof v === "string" && v.length > 0);
+      const { data: opts } = nodeIds.length
+        ? await supabase
+            .from("chat_flow_options")
+            .select("option_payload, label")
+            .in("node_id", nodeIds)
+        : { data: [] as Array<{ option_payload: unknown; label?: string | null }> };
       const montoKeysLower = new Set([
         "monto",
         "monto_compra",
