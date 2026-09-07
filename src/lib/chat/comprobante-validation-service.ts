@@ -882,10 +882,11 @@ export async function runComprobanteValidationPipeline(ctx: PipelineCtx): Promis
         /**
          * Tercer boton "Otra boleta": el cliente eligio un combo (p.ej. 20.000) pero
          * transfirio otro monto (p.ej. 10.000). En vez de rechazar y punto, se ofrece
-         * reelegir combo. La etiqueta "Otra boleta" matchea la keyword del detector de
-         * intencion de compra en flow-restart-intent (DEFAULT_SOFT_KEYWORDS); asi cae en
-         * `invalid_button_restart_intent` y el webhook reinicia el flujo desde el inicio
-         * para que el cliente elija un combo acorde a lo que efectivamente pago.
+         * cambiar el combo. El id `cmp_cambiar_combo` es interceptado explicitamente en
+         * `flow-engine-service` (junto al `enviar_otro`/`hablar_asesor`): si el monto
+         * detectado matchea un combo disponible, se reescribe `chat_flow_data` con el
+         * nuevo monto y se pide reenviar el comprobante (misma flow_session ⇒ dedup no
+         * lo traba y la validacion pasa naturalmente).
          *
          * WhatsApp permite maximo 3 botones interactivos.
          */
