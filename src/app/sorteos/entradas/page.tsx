@@ -6,6 +6,7 @@ import {
   type SorteoEntradasListParams,
 } from "@/lib/sorteos/server-queries";
 import type { SorteoEntradaEstadoPago } from "@/lib/sorteos/types";
+import EliminarCuponesButton from "./EliminarCuponesButton";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -308,7 +309,16 @@ export default async function SorteoEntradasPage({
                     </td>
                     <td className="px-5 py-3 text-sm">{r.nombre_participante}</td>
                     <td className="px-5 py-3 text-sm font-mono text-slate-600">{r.documento ?? "—"}</td>
-                    <td className="px-5 py-3 text-sm text-right tabular-nums">{r.cantidad_boletos}</td>
+                    <td className="px-5 py-3 text-sm text-right tabular-nums whitespace-nowrap">
+                      {r.cantidad_boletos}
+                      {r.cantidad_boletos > 0 ? (
+                        <EliminarCuponesButton
+                          entradaId={r.id}
+                          cantidadActual={r.cantidad_boletos}
+                          nombreParticipante={r.nombre_participante ?? "—"}
+                        />
+                      ) : null}
+                    </td>
                     <td className="px-5 py-3 text-sm text-right tabular-nums">{formatGs(r.monto_total)}</td>
                     <td className="px-5 py-3 text-sm">
                       <div className="text-xs font-medium text-slate-700">
