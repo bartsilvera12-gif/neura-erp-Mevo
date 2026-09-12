@@ -75,7 +75,33 @@ export type FlowNodeRowLite = {
 export type FlowOptRowLite = {
   node_id: string;
   next_node_code: string | null;
+  option_payload?: unknown;
 };
+
+/**
+ * Un nodo buttons/list solo cuenta como "captura de cantidad" cuando alguna de sus
+ * opciones aporta el monto/cantidad al flow_data. Un nodo buttons de otra intencion
+ * (p.ej. verificar mayoria de edad Si/No) no debe activar el gate de completitud:
+ * si lo activara, el engine redirigiria de vuelta a ese nodo cualquier hoja aguas
+ * abajo (como una rama de rechazo terminal) y quedaria en bucle preguntando.
+ */
+const CANTIDAD_PAYLOAD_KEYS = new Set([
+  "monto",
+  "monto_compra",
+  "monto_promocional",
+  "sorteo_monto_opcion",
+  "cantidad",
+  "sorteo_snap_cantidad",
+  "sorteo_cantidad_opcion",
+]);
+
+function optionPayloadCarriesCantidad(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  for (const k of Object.keys(payload as Record<string, unknown>)) {
+    if (CANTIDAD_PAYLOAD_KEYS.has(k.trim().toLowerCase())) return true;
+  }
+  return false;
+}
 
 /** Aristas del grafo: `next_node_code` de los nodos + `next_node_code` de cada opción. */
 export function buildFlowNodeAdjacency(
@@ -153,9 +179,18 @@ export function buildFlowNodeBfsOrder(nodes: FlowNodeRowLite[], opts: FlowOptRow
   return order;
 }
 
-function isCantidadCaptureNode(node: FlowNodeRowLite): boolean {
+function isCantidadCaptureNode(
+  node: FlowNodeRowLite,
+  optionsForNode?: FlowOptRowLite[]
+): boolean {
   const nt = norm(node.node_type).toLowerCase();
-  return nt === "buttons" || nt === "list";
+  if (nt !== "buttons" && nt !== "list") return false;
+  // Sin opciones cargadas, mantener el comportamiento historico (asumir captura de cantidad)
+  // para no cambiar el gate donde no se paso el mapa.
+  if (!optionsForNode) return true;
+  // Un buttons/list solo cuenta como captura de cantidad si alguna de sus opciones
+  // realmente escribe el monto/cantidad en flow_data.
+  return optionsForNode.some((o) => optionPayloadCarriesCantidad(o.option_payload));
 }
 
 function cantidadSatisfied(flowData: Record<string, string>): boolean {
@@ -186,6 +221,8 @@ export type FlowCaptureGraphContext = {
   nodesByCode: Map<string, FlowNodeRowLite>;
   /** Aristas reales: distinguen "más adelante en el flujo" de "en otra rama". */
   adj: Map<string, string[]>;
+  /** Opciones de cada nodo por node_code (para distinguir buttons de combo vs Si/No). */
+  optionsByCode: Map<string, FlowOptRowLite[]>;
 };
 
 async function loadFlowCaptureGraphContext(
@@ -211,7 +248,7 @@ async function loadFlowCaptureGraphContext(
   // depende de lo que devuelva el motor, que no está garantizado.
   const { data: optsRaw } = await supabase
     .from("chat_flow_options")
-    .select("node_id, next_node_code, sort_order")
+    .select("node_id, next_node_code, sort_order, option_payload")
     .in("node_id", nodeIds)
     .order("sort_order", { ascending: true });
   const opts = (optsRaw ?? []) as FlowOptRowLite[];
@@ -219,7 +256,16 @@ async function loadFlowCaptureGraphContext(
   const order = buildFlowNodeBfsOrder(nodes, opts);
   const nodesByCode = new Map(nodes.map((n) => [n.node_code.trim(), n]));
   const { adj } = buildFlowNodeAdjacency(nodes, opts);
-  return { order, nodesByCode, adj };
+  const idToCode = new Map(nodes.map((n) => [n.id, n.node_code.trim()]));
+  const optionsByCode = new Map<string, FlowOptRowLite[]>();
+  for (const o of opts) {
+    const code = idToCode.get(o.node_id);
+    if (!code) continue;
+    const list = optionsByCode.get(code) ?? [];
+    list.push(o);
+    optionsByCode.set(code, list);
+  }
+  return { order, nodesByCode, adj, optionsByCode };
 }
 
 function scanFirstIncompleteCapture(
@@ -234,7 +280,7 @@ function scanFirstIncompleteCapture(
 
     if (nt === "image_input" || nt === "human" || nt === "end") continue;
 
-    if (isCantidadCaptureNode(node)) {
+    if (isCantidadCaptureNode(node, ctx.optionsByCode.get(code))) {
       if (!cantidadSatisfied(flowData)) {
         return {
           nodeCode: code,
@@ -270,7 +316,7 @@ export function listOrderedCaptureFieldDescriptors(ctx: FlowCaptureGraphContext)
     if (!node) continue;
     const nt = norm(node.node_type).toLowerCase();
     if (nt === "image_input" || nt === "human" || nt === "end") continue;
-    if (isCantidadCaptureNode(node)) {
+    if (isCantidadCaptureNode(node, ctx.optionsByCode.get(code))) {
       out.push("cantidad");
       continue;
     }
@@ -293,7 +339,7 @@ export function listMissingCaptureFieldDescriptors(
     const nt = norm(node.node_type).toLowerCase();
     if (nt === "image_input" || nt === "human" || nt === "end") continue;
 
-    if (isCantidadCaptureNode(node)) {
+    if (isCantidadCaptureNode(node, ctx.optionsByCode.get(code))) {
       if (!cantidadSatisfied(flowData)) missing.push("cantidad");
       continue;
     }
