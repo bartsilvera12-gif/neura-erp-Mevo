@@ -74,9 +74,9 @@ export default function EliminarCuponesButton({
           setCantidad("");
         }}
         className="ml-2 text-[11px] text-red-600 hover:text-red-800 hover:underline"
-        title="Eliminar cupones de esta entrada"
+        title={`Eliminar cupones de esta entrada (máximo ${cantidadActual})`}
       >
-        Borrar
+        Borrar de {cantidadActual}
       </button>
       {open ? (
         <div
