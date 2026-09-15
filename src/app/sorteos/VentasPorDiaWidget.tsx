@@ -133,7 +133,6 @@ export default function VentasPorDiaWidget({ sorteoId, sorteoNombre }: Props) {
               <option value={14}>14 días</option>
               <option value={30}>30 días</option>
               <option value={60}>60 días</option>
-              <option value={90}>90 días</option>
             </select>
           </div>
         </div>
@@ -203,7 +202,9 @@ export default function VentasPorDiaWidget({ sorteoId, sorteoNombre }: Props) {
                   const h = (total / denom) * innerH;
                   const x = chartPadL + idx * (barW + barGap);
                   const y = chartPadT + innerH - h;
-                  const showLabel = view.length <= 30 || idx % Math.ceil(view.length / 15) === 0;
+                  // Etiquetas del eje X: dejar como maximo ~10 visibles para que no se pisen.
+                  const labelEvery = view.length <= 10 ? 1 : Math.ceil(view.length / 10);
+                  const showLabel = idx % labelEvery === 0 || idx === view.length - 1;
                   return (
                     <g key={r.fecha}>
                       {h > 0 ? (
