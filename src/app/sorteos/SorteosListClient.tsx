@@ -6,6 +6,7 @@ import { getSorteos } from "@/lib/sorteos/actions";
 import { getSorteosVentasKpisPorSorteo } from "@/lib/sorteos/ventas-kpis";
 import type { SorteosVentasKpis, SorteosKpisPorSorteo } from "@/lib/sorteos/ventas-kpis";
 import type { Sorteo } from "@/lib/sorteos/types";
+import VentasPorDiaWidget from "./VentasPorDiaWidget";
 
 function formatGs(n: number) {
   const s = Math.round(n).toLocaleString("es-PY", { maximumFractionDigits: 0 });
@@ -329,6 +330,9 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
           accent="featured"
         />
       </div>
+
+      {/* Ventas por día del sorteo seleccionado */}
+      <VentasPorDiaWidget sorteoId={selectedId} sorteoNombre={selectedNombre} />
 
       {/* Tabla */}
       <div className="overflow-hidden rounded-2xl border border-[#4FAEB2]/45 bg-white shadow-sm">
