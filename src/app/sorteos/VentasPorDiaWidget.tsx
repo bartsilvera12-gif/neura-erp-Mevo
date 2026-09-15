@@ -230,29 +230,52 @@ export default function VentasPorDiaWidget({ sorteoId, sorteoNombre }: Props) {
               </svg>
             </div>
 
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[420px] text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-[10px] uppercase tracking-[0.1em] text-slate-500">
-                    <th className="px-3 py-2 text-left">Día</th>
-                    <th className="px-3 py-2 text-right">Boletas</th>
-                    <th className="px-3 py-2 text-right">Monto</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {[...view].reverse().map((r) => (
-                    <tr key={r.fecha} className="hover:bg-slate-50/60">
-                      <td className="px-3 py-2 text-slate-700">{shortDate(r.fecha)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-800">
-                        {r.boletas.toLocaleString("es-PY")}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-800">
+            <div className="mt-5 overflow-hidden rounded-xl border border-slate-100">
+              <div className="grid grid-cols-[minmax(80px,110px)_1fr_minmax(120px,160px)] items-center gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                <div>Día</div>
+                <div>Boletas</div>
+                <div className="text-right">Monto</div>
+              </div>
+              <ul className="divide-y divide-slate-100">
+                {[...view].reverse().map((r, idx) => {
+                  const pct = maxTotal > 0 ? (r.boletas / maxTotal) * 100 : 0;
+                  const isToday = idx === 0;
+                  return (
+                    <li
+                      key={r.fecha}
+                      className={`grid grid-cols-[minmax(80px,110px)_1fr_minmax(120px,160px)] items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-slate-50/70 ${
+                        isToday ? "bg-[#4FAEB2]/[0.04]" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 text-slate-600">
+                        <span className="font-medium capitalize">{shortDate(r.fecha)}</span>
+                        {isToday ? (
+                          <span className="rounded-full bg-[#4FAEB2]/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#4FAEB2]">
+                            Hoy
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{
+                              width: `${Math.max(pct, r.boletas > 0 ? 2 : 0)}%`,
+                              background: barColor,
+                            }}
+                          />
+                        </div>
+                        <span className="min-w-[52px] text-right text-xs font-semibold tabular-nums text-slate-700">
+                          {r.boletas.toLocaleString("es-PY")}
+                        </span>
+                      </div>
+                      <div className="text-right tabular-nums text-slate-700">
                         {formatGs(r.monto)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           </>
         )}
