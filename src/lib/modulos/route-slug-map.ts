@@ -26,6 +26,7 @@ const SIDEBAR_SLUG_HREF_ORDER: { slug: string; href: string }[] = [
   { slug: "marketing", href: "/marketing" },
   { slug: "marketing_ops", href: "/dashboard/marketing-ops" },
   { slug: "sorteos", href: "/sorteos" },
+  { slug: "mercaderia", href: "/mercaderia" },
   { slug: "campanas", href: "/dashboard/campanas" },
   { slug: "proyectos", href: "/dashboard/proyectos" },
   { slug: "etiquetas", href: "/dashboard/etiquetas" },
@@ -142,5 +143,6 @@ export function pathRequiresModuleSlug(pathname: string): string | null {
   if (p.startsWith("/crm")) return "crm";
   if (p.startsWith("/marketing")) return "marketing";
   if (p.startsWith("/sorteos")) return "sorteos";
+  if (p.startsWith("/mercaderia")) return "mercaderia";
   return null;
 }
