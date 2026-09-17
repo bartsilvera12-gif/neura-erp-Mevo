@@ -1,7 +1,9 @@
 "use server";
 
 import { getUserAndEmpresa } from "@/lib/middleware/auth";
-import { getChatServiceClientForEmpresa } from "@/lib/supabase/chat-service-role-empresa";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
+import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
+import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 import type {
   MercAsignacion,
   MercProducto,
@@ -19,30 +21,47 @@ function logErr(where: string, err: unknown, extra: Record<string, unknown> = {}
   console.error(LOG, { where, msg, ...extra });
 }
 
-/** Devuelve empresa_id y user_id o null si no hay sesión. */
 async function ctx() {
   const auth = await getUserAndEmpresa(null);
   if (!auth?.empresa_id) return null;
-  return { empresa_id: auth.empresa_id, user_id: auth.user.id };
+  const schema = await fetchDataSchemaForEmpresaId(auth.empresa_id);
+  return { empresa_id: auth.empresa_id, user_id: auth.user.id, schema };
 }
 
-/** Sesión + rol resuelto. Útil para saber si el usuario logueado es vendedor. */
+function requirePool() {
+  const pool = getChatPostgresPool();
+  if (!pool) throw new Error("Falta SUPABASE_DB_URL/DIRECT_URL para consultar Postgres directo.");
+  return pool;
+}
+
+function num(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export async function getMercVendedorForCurrentUser(): Promise<MercVendedor | null> {
   const c = await ctx();
   if (!c) return null;
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    const { data, error } = await sb
-      .from("merc_vendedores")
-      .select("id, user_id, nombre, zona, activo, notas")
-      .eq("empresa_id", c.empresa_id)
-      .eq("user_id", c.user_id)
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) return null;
-    return data as MercVendedor;
+    const pool = requirePool();
+    const t = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_vendedores");
+    const r = await pool.query<{
+      id: string;
+      user_id: string | null;
+      nombre: string;
+      zona: string | null;
+      activo: boolean;
+      notas: string | null;
+    }>(
+      `select id, user_id, nombre, zona, activo, notas
+         from ${t}
+        where empresa_id = $1::uuid and user_id = $2::uuid
+        limit 1`,
+      [c.empresa_id, c.user_id]
+    );
+    return r.rows[0] ?? null;
   } catch (e) {
-    logErr("getMercVendedorForCurrentUser", e, { empresa_id: c.empresa_id });
+    logErr("getMercVendedorForCurrentUser", e, { empresa_id: c.empresa_id, schema: c.schema });
     return null;
   }
 }
@@ -51,20 +70,34 @@ export async function listProductos(soloActivos = true): Promise<MercProducto[]>
   const c = await ctx();
   if (!c) return [];
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    let q = sb
-      .from("merc_productos")
-      .select(
-        "id, nombre, costo_unitario, precio_unitario, comision_unitaria, precio_mayorista_6, comision_mayorista_6, precio_mayorista_12, comision_mayorista_12, tiene_mayorista, activo, orden"
-      )
-      .eq("empresa_id", c.empresa_id)
-      .order("orden", { ascending: true });
-    if (soloActivos) q = q.eq("activo", true);
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []) as MercProducto[];
+    const pool = requirePool();
+    const t = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_productos");
+    const where = soloActivos ? "and activo = true" : "";
+    const r = await pool.query(
+      `select id, nombre, costo_unitario, precio_unitario, comision_unitaria,
+              precio_mayorista_6, comision_mayorista_6, precio_mayorista_12, comision_mayorista_12,
+              tiene_mayorista, activo, orden
+         from ${t}
+        where empresa_id = $1::uuid ${where}
+        order by orden asc`,
+      [c.empresa_id]
+    );
+    return r.rows.map((row) => ({
+      id: String(row.id),
+      nombre: String(row.nombre),
+      costo_unitario: num(row.costo_unitario),
+      precio_unitario: num(row.precio_unitario),
+      comision_unitaria: num(row.comision_unitaria),
+      precio_mayorista_6: num(row.precio_mayorista_6),
+      comision_mayorista_6: num(row.comision_mayorista_6),
+      precio_mayorista_12: num(row.precio_mayorista_12),
+      comision_mayorista_12: num(row.comision_mayorista_12),
+      tiene_mayorista: !!row.tiene_mayorista,
+      activo: !!row.activo,
+      orden: num(row.orden),
+    }));
   } catch (e) {
-    logErr("listProductos", e);
+    logErr("listProductos", e, { schema: c.schema });
     return [];
   }
 }
@@ -73,18 +106,26 @@ export async function listVendedores(soloActivos = true): Promise<MercVendedor[]
   const c = await ctx();
   if (!c) return [];
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    let q = sb
-      .from("merc_vendedores")
-      .select("id, user_id, nombre, zona, activo, notas")
-      .eq("empresa_id", c.empresa_id)
-      .order("nombre", { ascending: true });
-    if (soloActivos) q = q.eq("activo", true);
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []) as MercVendedor[];
+    const pool = requirePool();
+    const t = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_vendedores");
+    const where = soloActivos ? "and activo = true" : "";
+    const r = await pool.query(
+      `select id, user_id, nombre, zona, activo, notas
+         from ${t}
+        where empresa_id = $1::uuid ${where}
+        order by nombre asc`,
+      [c.empresa_id]
+    );
+    return r.rows.map((row) => ({
+      id: String(row.id),
+      user_id: row.user_id ? String(row.user_id) : null,
+      nombre: String(row.nombre),
+      zona: row.zona ?? null,
+      activo: !!row.activo,
+      notas: row.notas ?? null,
+    }));
   } catch (e) {
-    logErr("listVendedores", e);
+    logErr("listVendedores", e, { schema: c.schema });
     return [];
   }
 }
@@ -93,18 +134,27 @@ export async function listStockPorVendedor(vendedorId?: string | null): Promise<
   const c = await ctx();
   if (!c) return [];
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    let q = sb
-      .from("merc_stock_vendedor_v")
-      .select("vendedor_id, vendedor_nombre, producto_id, producto_nombre, stock")
-      .eq("empresa_id", c.empresa_id)
-      .order("vendedor_nombre", { ascending: true });
-    if (vendedorId) q = q.eq("vendedor_id", vendedorId);
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []) as MercStockVendedor[];
+    const pool = requirePool();
+    const v = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_stock_vendedor_v");
+    const filtro = vendedorId ? "and vendedor_id = $2::uuid" : "";
+    const params: unknown[] = [c.empresa_id];
+    if (vendedorId) params.push(vendedorId);
+    const r = await pool.query(
+      `select vendedor_id, vendedor_nombre, producto_id, producto_nombre, stock
+         from ${v}
+        where empresa_id = $1::uuid ${filtro}
+        order by vendedor_nombre asc, producto_nombre asc`,
+      params
+    );
+    return r.rows.map((row) => ({
+      vendedor_id: String(row.vendedor_id),
+      vendedor_nombre: String(row.vendedor_nombre ?? ""),
+      producto_id: String(row.producto_id),
+      producto_nombre: String(row.producto_nombre ?? ""),
+      stock: num(row.stock),
+    }));
   } catch (e) {
-    logErr("listStockPorVendedor", e, { vendedorId });
+    logErr("listStockPorVendedor", e, { vendedorId, schema: c.schema });
     return [];
   }
 }
@@ -115,48 +165,53 @@ export async function listAsignaciones(
   const c = await ctx();
   if (!c) return [];
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    let q = sb
-      .from("merc_asignaciones")
-      .select(
-        "id, vendedor_id, producto_id, cantidad, costo_unitario_snapshot, notas, creado_por, created_at, merc_vendedores(nombre), merc_productos(nombre)"
-      )
-      .eq("empresa_id", c.empresa_id)
-      .order("created_at", { ascending: false })
-      .limit(Math.min(500, Math.max(1, filtros.limit ?? 200)));
-    if (filtros.vendedorId) q = q.eq("vendedor_id", filtros.vendedorId);
-    if (filtros.desde) q = q.gte("created_at", filtros.desde);
-    if (filtros.hasta) q = q.lte("created_at", filtros.hasta);
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []).map((r) => {
-      const row = r as unknown as {
-        id: string;
-        vendedor_id: string;
-        producto_id: string;
-        cantidad: number;
-        costo_unitario_snapshot: number;
-        notas: string | null;
-        creado_por: string | null;
-        created_at: string;
-        merc_vendedores?: { nombre?: string } | null;
-        merc_productos?: { nombre?: string } | null;
-      };
-      return {
-        id: row.id,
-        vendedor_id: row.vendedor_id,
-        vendedor_nombre: row.merc_vendedores?.nombre ?? undefined,
-        producto_id: row.producto_id,
-        producto_nombre: row.merc_productos?.nombre ?? undefined,
-        cantidad: row.cantidad,
-        costo_unitario_snapshot: row.costo_unitario_snapshot,
-        notas: row.notas,
-        creado_por: row.creado_por,
-        created_at: row.created_at,
-      } satisfies MercAsignacion;
-    });
+    const pool = requirePool();
+    const schema = assertAllowedChatDataSchema(c.schema);
+    const tA = quoteSchemaTable(schema, "merc_asignaciones");
+    const tV = quoteSchemaTable(schema, "merc_vendedores");
+    const tP = quoteSchemaTable(schema, "merc_productos");
+    const conds: string[] = ["a.empresa_id = $1::uuid"];
+    const params: unknown[] = [c.empresa_id];
+    if (filtros.vendedorId) {
+      params.push(filtros.vendedorId);
+      conds.push(`a.vendedor_id = $${params.length}::uuid`);
+    }
+    if (filtros.desde) {
+      params.push(filtros.desde);
+      conds.push(`a.created_at >= $${params.length}::timestamptz`);
+    }
+    if (filtros.hasta) {
+      params.push(filtros.hasta);
+      conds.push(`a.created_at <= $${params.length}::timestamptz`);
+    }
+    const limit = Math.min(500, Math.max(1, filtros.limit ?? 200));
+    params.push(limit);
+    const r = await pool.query(
+      `select a.id, a.vendedor_id, a.producto_id, a.cantidad, a.costo_unitario_snapshot,
+              a.notas, a.creado_por, a.created_at,
+              v.nombre as vendedor_nombre, p.nombre as producto_nombre
+         from ${tA} a
+         left join ${tV} v on v.id = a.vendedor_id
+         left join ${tP} p on p.id = a.producto_id
+        where ${conds.join(" and ")}
+        order by a.created_at desc
+        limit $${params.length}::int`,
+      params
+    );
+    return r.rows.map((row) => ({
+      id: String(row.id),
+      vendedor_id: String(row.vendedor_id),
+      vendedor_nombre: row.vendedor_nombre ?? undefined,
+      producto_id: String(row.producto_id),
+      producto_nombre: row.producto_nombre ?? undefined,
+      cantidad: num(row.cantidad),
+      costo_unitario_snapshot: num(row.costo_unitario_snapshot),
+      notas: row.notas ?? null,
+      creado_por: row.creado_por ? String(row.creado_por) : null,
+      created_at: String(row.created_at),
+    }));
   } catch (e) {
-    logErr("listAsignaciones", e, filtros);
+    logErr("listAsignaciones", e, { schema: c.schema });
     return [];
   }
 }
@@ -173,52 +228,56 @@ export async function listVentas(
   const c = await ctx();
   if (!c) return [];
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    let q = sb
-      .from("merc_ventas")
-      .select(
-        "id, vendedor_id, fecha, tipo, monto_total_real, costo_total_snapshot, comision_total_snapshot, utilidad_snapshot, notas, created_at, merc_vendedores(nombre)"
-      )
-      .eq("empresa_id", c.empresa_id)
-      .order("fecha", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(Math.min(500, Math.max(1, filtros.limit ?? 200)));
-    if (filtros.vendedorId) q = q.eq("vendedor_id", filtros.vendedorId);
-    if (filtros.desde) q = q.gte("fecha", filtros.desde);
-    if (filtros.hasta) q = q.lte("fecha", filtros.hasta);
-    if (filtros.tipo) q = q.eq("tipo", filtros.tipo);
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []).map((r) => {
-      const row = r as unknown as {
-        id: string;
-        vendedor_id: string;
-        fecha: string;
-        tipo: "simple" | "combo";
-        monto_total_real: number;
-        costo_total_snapshot: number;
-        comision_total_snapshot: number;
-        utilidad_snapshot: number;
-        notas: string | null;
-        created_at: string;
-        merc_vendedores?: { nombre?: string } | null;
-      };
-      return {
-        id: row.id,
-        vendedor_id: row.vendedor_id,
-        vendedor_nombre: row.merc_vendedores?.nombre ?? undefined,
-        fecha: row.fecha,
-        tipo: row.tipo,
-        monto_total_real: row.monto_total_real,
-        costo_total_snapshot: row.costo_total_snapshot,
-        comision_total_snapshot: row.comision_total_snapshot,
-        utilidad_snapshot: row.utilidad_snapshot,
-        notas: row.notas,
-        created_at: row.created_at,
-      } satisfies MercVenta;
-    });
+    const pool = requirePool();
+    const schema = assertAllowedChatDataSchema(c.schema);
+    const tV = quoteSchemaTable(schema, "merc_ventas");
+    const tVend = quoteSchemaTable(schema, "merc_vendedores");
+    const conds: string[] = ["v.empresa_id = $1::uuid"];
+    const params: unknown[] = [c.empresa_id];
+    if (filtros.vendedorId) {
+      params.push(filtros.vendedorId);
+      conds.push(`v.vendedor_id = $${params.length}::uuid`);
+    }
+    if (filtros.desde) {
+      params.push(filtros.desde);
+      conds.push(`v.fecha >= $${params.length}::date`);
+    }
+    if (filtros.hasta) {
+      params.push(filtros.hasta);
+      conds.push(`v.fecha <= $${params.length}::date`);
+    }
+    if (filtros.tipo) {
+      params.push(filtros.tipo);
+      conds.push(`v.tipo = $${params.length}::text`);
+    }
+    const limit = Math.min(500, Math.max(1, filtros.limit ?? 200));
+    params.push(limit);
+    const r = await pool.query(
+      `select v.id, v.vendedor_id, v.fecha, v.tipo, v.monto_total_real,
+              v.costo_total_snapshot, v.comision_total_snapshot, v.utilidad_snapshot,
+              v.notas, v.created_at, vend.nombre as vendedor_nombre
+         from ${tV} v
+         left join ${tVend} vend on vend.id = v.vendedor_id
+        where ${conds.join(" and ")}
+        order by v.fecha desc, v.created_at desc
+        limit $${params.length}::int`,
+      params
+    );
+    return r.rows.map((row) => ({
+      id: String(row.id),
+      vendedor_id: String(row.vendedor_id),
+      vendedor_nombre: row.vendedor_nombre ?? undefined,
+      fecha: String(row.fecha).slice(0, 10),
+      tipo: row.tipo === "combo" ? "combo" : "simple",
+      monto_total_real: num(row.monto_total_real),
+      costo_total_snapshot: num(row.costo_total_snapshot),
+      comision_total_snapshot: num(row.comision_total_snapshot),
+      utilidad_snapshot: num(row.utilidad_snapshot),
+      notas: row.notas ?? null,
+      created_at: String(row.created_at),
+    }));
   } catch (e) {
-    logErr("listVentas", e, filtros);
+    logErr("listVentas", e, { schema: c.schema });
     return [];
   }
 }
@@ -229,76 +288,61 @@ export async function getVentaConItems(
   const c = await ctx();
   if (!c) return null;
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    const { data: v, error: eV } = await sb
-      .from("merc_ventas")
-      .select(
-        "id, vendedor_id, fecha, tipo, monto_total_real, costo_total_snapshot, comision_total_snapshot, utilidad_snapshot, notas, created_at, merc_vendedores(nombre)"
-      )
-      .eq("empresa_id", c.empresa_id)
-      .eq("id", ventaId)
-      .maybeSingle();
-    if (eV) throw eV;
-    if (!v) return null;
-    const { data: items, error: eI } = await sb
-      .from("merc_ventas_items")
-      .select(
-        "id, venta_id, producto_id, cantidad, costo_unitario_snapshot, comision_unitaria_snapshot, escala_aplicada, merc_productos(nombre)"
-      )
-      .eq("empresa_id", c.empresa_id)
-      .eq("venta_id", ventaId);
-    if (eI) throw eI;
-    const vRow = v as unknown as {
-      id: string;
-      vendedor_id: string;
-      fecha: string;
-      tipo: "simple" | "combo";
-      monto_total_real: number;
-      costo_total_snapshot: number;
-      comision_total_snapshot: number;
-      utilidad_snapshot: number;
-      notas: string | null;
-      created_at: string;
-      merc_vendedores?: { nombre?: string } | null;
-    };
+    const pool = requirePool();
+    const schema = assertAllowedChatDataSchema(c.schema);
+    const tV = quoteSchemaTable(schema, "merc_ventas");
+    const tVend = quoteSchemaTable(schema, "merc_vendedores");
+    const tI = quoteSchemaTable(schema, "merc_ventas_items");
+    const tP = quoteSchemaTable(schema, "merc_productos");
+    const rv = await pool.query(
+      `select v.id, v.vendedor_id, v.fecha, v.tipo, v.monto_total_real,
+              v.costo_total_snapshot, v.comision_total_snapshot, v.utilidad_snapshot,
+              v.notas, v.created_at, vend.nombre as vendedor_nombre
+         from ${tV} v
+         left join ${tVend} vend on vend.id = v.vendedor_id
+        where v.empresa_id = $1::uuid and v.id = $2::uuid`,
+      [c.empresa_id, ventaId]
+    );
+    if (rv.rowCount === 0) return null;
+    const row = rv.rows[0];
     const venta: MercVenta = {
-      id: vRow.id,
-      vendedor_id: vRow.vendedor_id,
-      vendedor_nombre: vRow.merc_vendedores?.nombre ?? undefined,
-      fecha: vRow.fecha,
-      tipo: vRow.tipo,
-      monto_total_real: vRow.monto_total_real,
-      costo_total_snapshot: vRow.costo_total_snapshot,
-      comision_total_snapshot: vRow.comision_total_snapshot,
-      utilidad_snapshot: vRow.utilidad_snapshot,
-      notas: vRow.notas,
-      created_at: vRow.created_at,
+      id: String(row.id),
+      vendedor_id: String(row.vendedor_id),
+      vendedor_nombre: row.vendedor_nombre ?? undefined,
+      fecha: String(row.fecha).slice(0, 10),
+      tipo: row.tipo === "combo" ? "combo" : "simple",
+      monto_total_real: num(row.monto_total_real),
+      costo_total_snapshot: num(row.costo_total_snapshot),
+      comision_total_snapshot: num(row.comision_total_snapshot),
+      utilidad_snapshot: num(row.utilidad_snapshot),
+      notas: row.notas ?? null,
+      created_at: String(row.created_at),
     };
-    const mapped: MercVentaItem[] = (items ?? []).map((r) => {
-      const it = r as unknown as {
-        id: string;
-        venta_id: string;
-        producto_id: string;
-        cantidad: number;
-        costo_unitario_snapshot: number;
-        comision_unitaria_snapshot: number;
-        escala_aplicada: MercVentaItem["escala_aplicada"];
-        merc_productos?: { nombre?: string } | null;
-      };
-      return {
-        id: it.id,
-        venta_id: it.venta_id,
-        producto_id: it.producto_id,
-        producto_nombre: it.merc_productos?.nombre ?? undefined,
-        cantidad: it.cantidad,
-        costo_unitario_snapshot: it.costo_unitario_snapshot,
-        comision_unitaria_snapshot: it.comision_unitaria_snapshot,
-        escala_aplicada: it.escala_aplicada,
-      } satisfies MercVentaItem;
-    });
-    return { venta, items: mapped };
+    const ri = await pool.query(
+      `select i.id, i.venta_id, i.producto_id, i.cantidad,
+              i.costo_unitario_snapshot, i.comision_unitaria_snapshot, i.escala_aplicada,
+              p.nombre as producto_nombre
+         from ${tI} i
+         left join ${tP} p on p.id = i.producto_id
+        where i.empresa_id = $1::uuid and i.venta_id = $2::uuid`,
+      [c.empresa_id, ventaId]
+    );
+    const items = ri.rows.map((it) => ({
+      id: String(it.id),
+      venta_id: String(it.venta_id),
+      producto_id: String(it.producto_id),
+      producto_nombre: it.producto_nombre ?? undefined,
+      cantidad: num(it.cantidad),
+      costo_unitario_snapshot: num(it.costo_unitario_snapshot),
+      comision_unitaria_snapshot: num(it.comision_unitaria_snapshot),
+      escala_aplicada:
+        it.escala_aplicada === "mayorista_12" || it.escala_aplicada === "mayorista_6"
+          ? it.escala_aplicada
+          : "unitario",
+    })) as MercVentaItem[];
+    return { venta, items };
   } catch (e) {
-    logErr("getVentaConItems", e, { ventaId });
+    logErr("getVentaConItems", e, { ventaId, schema: c.schema });
     return null;
   }
 }
@@ -309,50 +353,52 @@ export async function listRendiciones(
   const c = await ctx();
   if (!c) return [];
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    let q = sb
-      .from("merc_rendiciones")
-      .select(
-        "id, vendedor_id, fecha, monto_rendido, comision_pagada, notas, created_at, merc_vendedores(nombre)"
-      )
-      .eq("empresa_id", c.empresa_id)
-      .order("fecha", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(Math.min(500, Math.max(1, filtros.limit ?? 200)));
-    if (filtros.vendedorId) q = q.eq("vendedor_id", filtros.vendedorId);
-    if (filtros.desde) q = q.gte("fecha", filtros.desde);
-    if (filtros.hasta) q = q.lte("fecha", filtros.hasta);
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data ?? []).map((r) => {
-      const row = r as unknown as {
-        id: string;
-        vendedor_id: string;
-        fecha: string;
-        monto_rendido: number;
-        comision_pagada: number;
-        notas: string | null;
-        created_at: string;
-        merc_vendedores?: { nombre?: string } | null;
-      };
-      return {
-        id: row.id,
-        vendedor_id: row.vendedor_id,
-        vendedor_nombre: row.merc_vendedores?.nombre ?? undefined,
-        fecha: row.fecha,
-        monto_rendido: row.monto_rendido,
-        comision_pagada: row.comision_pagada,
-        notas: row.notas,
-        created_at: row.created_at,
-      } satisfies MercRendicion;
-    });
+    const pool = requirePool();
+    const schema = assertAllowedChatDataSchema(c.schema);
+    const tR = quoteSchemaTable(schema, "merc_rendiciones");
+    const tV = quoteSchemaTable(schema, "merc_vendedores");
+    const conds: string[] = ["r.empresa_id = $1::uuid"];
+    const params: unknown[] = [c.empresa_id];
+    if (filtros.vendedorId) {
+      params.push(filtros.vendedorId);
+      conds.push(`r.vendedor_id = $${params.length}::uuid`);
+    }
+    if (filtros.desde) {
+      params.push(filtros.desde);
+      conds.push(`r.fecha >= $${params.length}::date`);
+    }
+    if (filtros.hasta) {
+      params.push(filtros.hasta);
+      conds.push(`r.fecha <= $${params.length}::date`);
+    }
+    const limit = Math.min(500, Math.max(1, filtros.limit ?? 200));
+    params.push(limit);
+    const q = await pool.query(
+      `select r.id, r.vendedor_id, r.fecha, r.monto_rendido, r.comision_pagada,
+              r.notas, r.created_at, v.nombre as vendedor_nombre
+         from ${tR} r
+         left join ${tV} v on v.id = r.vendedor_id
+        where ${conds.join(" and ")}
+        order by r.fecha desc, r.created_at desc
+        limit $${params.length}::int`,
+      params
+    );
+    return q.rows.map((row) => ({
+      id: String(row.id),
+      vendedor_id: String(row.vendedor_id),
+      vendedor_nombre: row.vendedor_nombre ?? undefined,
+      fecha: String(row.fecha).slice(0, 10),
+      monto_rendido: num(row.monto_rendido),
+      comision_pagada: num(row.comision_pagada),
+      notas: row.notas ?? null,
+      created_at: String(row.created_at),
+    }));
   } catch (e) {
-    logErr("listRendiciones", e, filtros);
+    logErr("listRendiciones", e, { schema: c.schema });
     return [];
   }
 }
 
-/** KPIs por vendedor entre dos fechas (inclusive). Devuelve totales y por vendedor. */
 export type MercKpiRow = {
   vendedor_id: string;
   vendedor_nombre: string;
@@ -362,49 +408,39 @@ export type MercKpiRow = {
   utilidad_total: number;
 };
 
-export async function getKpisPorVendedor(
-  desde: string,
-  hasta: string
-): Promise<MercKpiRow[]> {
+export async function getKpisPorVendedor(desde: string, hasta: string): Promise<MercKpiRow[]> {
   const c = await ctx();
   if (!c) return [];
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    const { data, error } = await sb
-      .from("merc_ventas")
-      .select(
-        "vendedor_id, monto_total_real, comision_total_snapshot, utilidad_snapshot, merc_vendedores(nombre)"
-      )
-      .eq("empresa_id", c.empresa_id)
-      .gte("fecha", desde)
-      .lte("fecha", hasta);
-    if (error) throw error;
-    const acc = new Map<string, MercKpiRow>();
-    for (const r of (data ?? []) as Array<{
-      vendedor_id: string;
-      monto_total_real: number;
-      comision_total_snapshot: number;
-      utilidad_snapshot: number;
-      merc_vendedores?: { nombre?: string } | null;
-    }>) {
-      const key = r.vendedor_id;
-      const existing = acc.get(key) ?? {
-        vendedor_id: key,
-        vendedor_nombre: r.merc_vendedores?.nombre ?? "",
-        ventas_cantidad: 0,
-        monto_total: 0,
-        comision_total: 0,
-        utilidad_total: 0,
-      };
-      existing.ventas_cantidad += 1;
-      existing.monto_total += Number(r.monto_total_real) || 0;
-      existing.comision_total += Number(r.comision_total_snapshot) || 0;
-      existing.utilidad_total += Number(r.utilidad_snapshot) || 0;
-      acc.set(key, existing);
-    }
-    return [...acc.values()].sort((a, b) => a.vendedor_nombre.localeCompare(b.vendedor_nombre));
+    const pool = requirePool();
+    const schema = assertAllowedChatDataSchema(c.schema);
+    const tV = quoteSchemaTable(schema, "merc_ventas");
+    const tVend = quoteSchemaTable(schema, "merc_vendedores");
+    const r = await pool.query(
+      `select v.vendedor_id as vendedor_id,
+              coalesce(vend.nombre, '') as vendedor_nombre,
+              count(v.id)::int as ventas_cantidad,
+              coalesce(sum(v.monto_total_real), 0) as monto_total,
+              coalesce(sum(v.comision_total_snapshot), 0) as comision_total,
+              coalesce(sum(v.utilidad_snapshot), 0) as utilidad_total
+         from ${tV} v
+         left join ${tVend} vend on vend.id = v.vendedor_id
+        where v.empresa_id = $1::uuid
+          and v.fecha >= $2::date and v.fecha <= $3::date
+        group by v.vendedor_id, vend.nombre
+        order by vendedor_nombre asc`,
+      [c.empresa_id, desde, hasta]
+    );
+    return r.rows.map((row) => ({
+      vendedor_id: String(row.vendedor_id),
+      vendedor_nombre: String(row.vendedor_nombre ?? ""),
+      ventas_cantidad: num(row.ventas_cantidad),
+      monto_total: num(row.monto_total),
+      comision_total: num(row.comision_total),
+      utilidad_total: num(row.utilidad_total),
+    }));
   } catch (e) {
-    logErr("getKpisPorVendedor", e, { desde, hasta });
+    logErr("getKpisPorVendedor", e, { desde, hasta, schema: c.schema });
     return [];
   }
 }

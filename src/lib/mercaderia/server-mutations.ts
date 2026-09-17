@@ -1,7 +1,9 @@
 "use server";
 
 import { getUserAndEmpresa } from "@/lib/middleware/auth";
-import { getChatServiceClientForEmpresa } from "@/lib/supabase/chat-service-role-empresa";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
+import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
+import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 import { calcularOperacion, utilidad } from "./escala";
 import type { MercProducto, TipoVenta } from "./types";
 
@@ -14,7 +16,14 @@ function toErr(e: unknown): string {
 async function ctx() {
   const auth = await getUserAndEmpresa(null);
   if (!auth?.empresa_id) return null;
-  return { empresa_id: auth.empresa_id, user_id: auth.user.id };
+  const schema = await fetchDataSchemaForEmpresaId(auth.empresa_id);
+  return { empresa_id: auth.empresa_id, user_id: auth.user.id, schema };
+}
+
+function requirePool() {
+  const pool = getChatPostgresPool();
+  if (!pool) throw new Error("Falta SUPABASE_DB_URL/DIRECT_URL para escribir en Postgres.");
+  return pool;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -39,27 +48,33 @@ export async function createProducto(input: ProductoInput): Promise<{ ok: boolea
   const c = await ctx();
   if (!c) return { ok: false, error: "no_session" };
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    const { data, error } = await sb
-      .from("merc_productos")
-      .insert({
-        empresa_id: c.empresa_id,
-        nombre: String(input.nombre ?? "").trim(),
-        costo_unitario: Number(input.costo_unitario) || 0,
-        precio_unitario: Number(input.precio_unitario) || 0,
-        comision_unitaria: Number(input.comision_unitaria) || 0,
-        precio_mayorista_6: Number(input.precio_mayorista_6) || 0,
-        comision_mayorista_6: Number(input.comision_mayorista_6) || 0,
-        precio_mayorista_12: Number(input.precio_mayorista_12) || 0,
-        comision_mayorista_12: Number(input.comision_mayorista_12) || 0,
-        tiene_mayorista: input.tiene_mayorista ?? true,
-        activo: input.activo ?? true,
-        orden: Number(input.orden) || 0,
-      })
-      .select("id")
-      .single();
-    if (error) throw error;
-    return { ok: true, id: (data as { id: string }).id };
+    const pool = requirePool();
+    const t = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_productos");
+    const r = await pool.query<{ id: string }>(
+      `insert into ${t}
+        (empresa_id, nombre, costo_unitario, precio_unitario, comision_unitaria,
+         precio_mayorista_6, comision_mayorista_6, precio_mayorista_12, comision_mayorista_12,
+         tiene_mayorista, activo, orden)
+       values ($1::uuid, $2::text, $3::numeric, $4::numeric, $5::numeric,
+               $6::numeric, $7::numeric, $8::numeric, $9::numeric,
+               $10::boolean, $11::boolean, $12::int)
+       returning id`,
+      [
+        c.empresa_id,
+        String(input.nombre ?? "").trim(),
+        Number(input.costo_unitario) || 0,
+        Number(input.precio_unitario) || 0,
+        Number(input.comision_unitaria) || 0,
+        Number(input.precio_mayorista_6) || 0,
+        Number(input.comision_mayorista_6) || 0,
+        Number(input.precio_mayorista_12) || 0,
+        Number(input.comision_mayorista_12) || 0,
+        input.tiene_mayorista ?? true,
+        input.activo ?? true,
+        Number(input.orden) || 0,
+      ]
+    );
+    return { ok: true, id: r.rows[0].id };
   } catch (e) {
     console.error(LOG, "createProducto", toErr(e));
     return { ok: false, error: toErr(e) };
@@ -70,26 +85,33 @@ export async function updateProducto(id: string, patch: Partial<ProductoInput>):
   const c = await ctx();
   if (!c) return { ok: false, error: "no_session" };
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    const upd: Record<string, unknown> = {};
-    if (patch.nombre !== undefined) upd.nombre = String(patch.nombre).trim();
-    if (patch.costo_unitario !== undefined) upd.costo_unitario = Number(patch.costo_unitario) || 0;
-    if (patch.precio_unitario !== undefined) upd.precio_unitario = Number(patch.precio_unitario) || 0;
-    if (patch.comision_unitaria !== undefined) upd.comision_unitaria = Number(patch.comision_unitaria) || 0;
-    if (patch.precio_mayorista_6 !== undefined) upd.precio_mayorista_6 = Number(patch.precio_mayorista_6) || 0;
-    if (patch.comision_mayorista_6 !== undefined) upd.comision_mayorista_6 = Number(patch.comision_mayorista_6) || 0;
-    if (patch.precio_mayorista_12 !== undefined) upd.precio_mayorista_12 = Number(patch.precio_mayorista_12) || 0;
-    if (patch.comision_mayorista_12 !== undefined) upd.comision_mayorista_12 = Number(patch.comision_mayorista_12) || 0;
-    if (patch.tiene_mayorista !== undefined) upd.tiene_mayorista = !!patch.tiene_mayorista;
-    if (patch.activo !== undefined) upd.activo = !!patch.activo;
-    if (patch.orden !== undefined) upd.orden = Number(patch.orden) || 0;
-    if (Object.keys(upd).length === 0) return { ok: true };
-    const { error } = await sb
-      .from("merc_productos")
-      .update(upd)
-      .eq("id", id)
-      .eq("empresa_id", c.empresa_id);
-    if (error) throw error;
+    const pool = requirePool();
+    const t = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_productos");
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    function add(col: string, value: unknown, type: string) {
+      params.push(value);
+      sets.push(`${col} = $${params.length}::${type}`);
+    }
+    if (patch.nombre !== undefined) add("nombre", String(patch.nombre).trim(), "text");
+    if (patch.costo_unitario !== undefined) add("costo_unitario", Number(patch.costo_unitario) || 0, "numeric");
+    if (patch.precio_unitario !== undefined) add("precio_unitario", Number(patch.precio_unitario) || 0, "numeric");
+    if (patch.comision_unitaria !== undefined) add("comision_unitaria", Number(patch.comision_unitaria) || 0, "numeric");
+    if (patch.precio_mayorista_6 !== undefined) add("precio_mayorista_6", Number(patch.precio_mayorista_6) || 0, "numeric");
+    if (patch.comision_mayorista_6 !== undefined) add("comision_mayorista_6", Number(patch.comision_mayorista_6) || 0, "numeric");
+    if (patch.precio_mayorista_12 !== undefined) add("precio_mayorista_12", Number(patch.precio_mayorista_12) || 0, "numeric");
+    if (patch.comision_mayorista_12 !== undefined) add("comision_mayorista_12", Number(patch.comision_mayorista_12) || 0, "numeric");
+    if (patch.tiene_mayorista !== undefined) add("tiene_mayorista", !!patch.tiene_mayorista, "boolean");
+    if (patch.activo !== undefined) add("activo", !!patch.activo, "boolean");
+    if (patch.orden !== undefined) add("orden", Number(patch.orden) || 0, "int");
+    if (sets.length === 0) return { ok: true };
+    params.push(id);
+    params.push(c.empresa_id);
+    await pool.query(
+      `update ${t} set ${sets.join(", ")}
+       where id = $${params.length - 1}::uuid and empresa_id = $${params.length}::uuid`,
+      params
+    );
     return { ok: true };
   } catch (e) {
     console.error(LOG, "updateProducto", toErr(e));
@@ -113,21 +135,22 @@ export async function createVendedor(input: VendedorInput): Promise<{ ok: boolea
   const c = await ctx();
   if (!c) return { ok: false, error: "no_session" };
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    const { data, error } = await sb
-      .from("merc_vendedores")
-      .insert({
-        empresa_id: c.empresa_id,
-        nombre: String(input.nombre ?? "").trim(),
-        zona: input.zona ? String(input.zona).trim() : null,
-        user_id: input.user_id ? String(input.user_id).trim() : null,
-        activo: input.activo ?? true,
-        notas: input.notas ? String(input.notas).trim() : null,
-      })
-      .select("id")
-      .single();
-    if (error) throw error;
-    return { ok: true, id: (data as { id: string }).id };
+    const pool = requirePool();
+    const t = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_vendedores");
+    const r = await pool.query<{ id: string }>(
+      `insert into ${t} (empresa_id, nombre, zona, user_id, activo, notas)
+       values ($1::uuid, $2::text, $3::text, $4::uuid, $5::boolean, $6::text)
+       returning id`,
+      [
+        c.empresa_id,
+        String(input.nombre ?? "").trim(),
+        input.zona ? String(input.zona).trim() : null,
+        input.user_id ? String(input.user_id).trim() : null,
+        input.activo ?? true,
+        input.notas ? String(input.notas).trim() : null,
+      ]
+    );
+    return { ok: true, id: r.rows[0].id };
   } catch (e) {
     console.error(LOG, "createVendedor", toErr(e));
     return { ok: false, error: toErr(e) };
@@ -138,20 +161,27 @@ export async function updateVendedor(id: string, patch: Partial<VendedorInput>):
   const c = await ctx();
   if (!c) return { ok: false, error: "no_session" };
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    const upd: Record<string, unknown> = {};
-    if (patch.nombre !== undefined) upd.nombre = String(patch.nombre).trim();
-    if (patch.zona !== undefined) upd.zona = patch.zona ? String(patch.zona).trim() : null;
-    if (patch.user_id !== undefined) upd.user_id = patch.user_id ? String(patch.user_id).trim() : null;
-    if (patch.activo !== undefined) upd.activo = !!patch.activo;
-    if (patch.notas !== undefined) upd.notas = patch.notas ? String(patch.notas).trim() : null;
-    if (Object.keys(upd).length === 0) return { ok: true };
-    const { error } = await sb
-      .from("merc_vendedores")
-      .update(upd)
-      .eq("id", id)
-      .eq("empresa_id", c.empresa_id);
-    if (error) throw error;
+    const pool = requirePool();
+    const t = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_vendedores");
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    function add(col: string, value: unknown, type: string) {
+      params.push(value);
+      sets.push(`${col} = $${params.length}::${type}`);
+    }
+    if (patch.nombre !== undefined) add("nombre", String(patch.nombre).trim(), "text");
+    if (patch.zona !== undefined) add("zona", patch.zona ? String(patch.zona).trim() : null, "text");
+    if (patch.user_id !== undefined) add("user_id", patch.user_id ? String(patch.user_id).trim() : null, "uuid");
+    if (patch.activo !== undefined) add("activo", !!patch.activo, "boolean");
+    if (patch.notas !== undefined) add("notas", patch.notas ? String(patch.notas).trim() : null, "text");
+    if (sets.length === 0) return { ok: true };
+    params.push(id);
+    params.push(c.empresa_id);
+    await pool.query(
+      `update ${t} set ${sets.join(", ")}
+       where id = $${params.length - 1}::uuid and empresa_id = $${params.length}::uuid`,
+      params
+    );
     return { ok: true };
   } catch (e) {
     console.error(LOG, "updateVendedor", toErr(e));
@@ -160,16 +190,11 @@ export async function updateVendedor(id: string, patch: Partial<VendedorInput>):
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Asignaciones de stock
+// Asignaciones
 // ────────────────────────────────────────────────────────────────────────────
 
 export type AsignacionLinea = { producto_id: string; cantidad: number };
 
-/**
- * Registra un lote de asignaciones (una fila por producto) para un vendedor.
- * La cantidad se toma como positiva (asignar). Para retirar stock, pasar
- * `retirar: true` (guarda cantidades negativas).
- */
 export async function asignarMercaderia(
   vendedorId: string,
   lineas: AsignacionLinea[],
@@ -185,31 +210,47 @@ export async function asignarMercaderia(
     .filter((l) => l.producto_id && l.cantidad > 0);
   if (limpias.length === 0) return { ok: false, error: "sin_lineas" };
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
-    // Traer snapshot de costo actual para cada producto
-    const { data: prodRows, error: pErr } = await sb
-      .from("merc_productos")
-      .select("id, costo_unitario")
-      .eq("empresa_id", c.empresa_id)
-      .in("id", limpias.map((l) => l.producto_id));
-    if (pErr) throw pErr;
-    const costos = new Map<string, number>();
-    for (const r of (prodRows ?? []) as Array<{ id: string; costo_unitario: number }>) {
-      costos.set(r.id, Number(r.costo_unitario) || 0);
+    const pool = requirePool();
+    const schema = assertAllowedChatDataSchema(c.schema);
+    const tP = quoteSchemaTable(schema, "merc_productos");
+    const tA = quoteSchemaTable(schema, "merc_asignaciones");
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const costsRes = await client.query<{ id: string; costo_unitario: number | string }>(
+        `select id, costo_unitario from ${tP}
+         where empresa_id = $1::uuid and id = any($2::uuid[])`,
+        [c.empresa_id, limpias.map((l) => l.producto_id)]
+      );
+      const costos = new Map<string, number>();
+      for (const r of costsRes.rows) costos.set(String(r.id), Number(r.costo_unitario) || 0);
+      const signo = opts.retirar ? -1 : 1;
+      for (const l of limpias) {
+        await client.query(
+          `insert into ${tA}
+            (empresa_id, vendedor_id, producto_id, cantidad, costo_unitario_snapshot, notas, creado_por)
+           values ($1::uuid, $2::uuid, $3::uuid, $4::int, $5::numeric, $6::text, $7::uuid)`,
+          [
+            c.empresa_id,
+            vendedorId,
+            l.producto_id,
+            signo * l.cantidad,
+            costos.get(l.producto_id) ?? 0,
+            opts.notas ?? null,
+            c.user_id,
+          ]
+        );
+      }
+      await client.query("commit");
+      return { ok: true, asignadas: limpias.length };
+    } catch (e) {
+      try {
+        await client.query("rollback");
+      } catch {}
+      throw e;
+    } finally {
+      client.release();
     }
-    const signo = opts.retirar ? -1 : 1;
-    const rows = limpias.map((l) => ({
-      empresa_id: c.empresa_id,
-      vendedor_id: vendedorId,
-      producto_id: l.producto_id,
-      cantidad: signo * l.cantidad,
-      costo_unitario_snapshot: costos.get(l.producto_id) ?? 0,
-      notas: opts.notas ?? null,
-      creado_por: c.user_id,
-    }));
-    const { error } = await sb.from("merc_asignaciones").insert(rows);
-    if (error) throw error;
-    return { ok: true, asignadas: rows.length };
   } catch (e) {
     console.error(LOG, "asignarMercaderia", toErr(e));
     return { ok: false, error: toErr(e) };
@@ -223,7 +264,7 @@ export async function asignarMercaderia(
 export type VentaInput = {
   vendedor_id: string;
   tipo: TipoVenta;
-  fecha?: string | null; // YYYY-MM-DD; default hoy
+  fecha?: string | null;
   monto_total_real: number;
   lineas: Array<{ producto_id: string; cantidad: number }>;
   notas?: string | null;
@@ -242,86 +283,126 @@ export async function registrarVenta(input: VentaInput): Promise<{ ok: boolean; 
   }
 
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
+    const pool = requirePool();
+    const schema = assertAllowedChatDataSchema(c.schema);
+    const tP = quoteSchemaTable(schema, "merc_productos");
+    const tV = quoteSchemaTable(schema, "merc_ventas");
+    const tI = quoteSchemaTable(schema, "merc_ventas_items");
+    const tS = quoteSchemaTable(schema, "merc_stock_vendedor_v");
 
-    // Cargar productos referenciados
     const productoIds = Array.from(new Set(input.lineas.map((l) => String(l.producto_id ?? "").trim()).filter(Boolean)));
-    const { data: prodRows, error: pErr } = await sb
-      .from("merc_productos")
-      .select(
-        "id, nombre, costo_unitario, precio_unitario, comision_unitaria, precio_mayorista_6, comision_mayorista_6, precio_mayorista_12, comision_mayorista_12, tiene_mayorista, activo, orden"
-      )
-      .eq("empresa_id", c.empresa_id)
-      .in("id", productoIds);
-    if (pErr) throw pErr;
-    const productosById = new Map<string, MercProducto>(
-      ((prodRows ?? []) as MercProducto[]).map((p) => [p.id, p])
-    );
 
-    const op = calcularOperacion(tipo, input.lineas, productosById);
-    if (op.cantidad_total <= 0) return { ok: false, error: "sin_cantidades" };
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
 
-    // Chequeo de stock por vendedor: para cada producto pedido, cuánto tiene.
-    const { data: stockRows, error: sErr } = await sb
-      .from("merc_stock_vendedor_v")
-      .select("producto_id, stock")
-      .eq("empresa_id", c.empresa_id)
-      .eq("vendedor_id", input.vendedor_id)
-      .in("producto_id", productoIds);
-    if (sErr) throw sErr;
-    const stockPorProducto = new Map<string, number>();
-    for (const r of (stockRows ?? []) as Array<{ producto_id: string; stock: number }>) {
-      stockPorProducto.set(r.producto_id, Number(r.stock) || 0);
-    }
-    for (const l of op.lineas) {
-      const disponible = stockPorProducto.get(l.producto_id) ?? 0;
-      if (l.cantidad > disponible) {
-        const nombre = productosById.get(l.producto_id)?.nombre ?? l.producto_id;
-        return {
-          ok: false,
-          error: `Stock insuficiente para ${nombre}: pediste ${l.cantidad}, hay ${disponible}.`,
-        };
+      const pRes = await client.query(
+        `select id, nombre, costo_unitario, precio_unitario, comision_unitaria,
+                precio_mayorista_6, comision_mayorista_6, precio_mayorista_12, comision_mayorista_12,
+                tiene_mayorista, activo, orden
+           from ${tP}
+          where empresa_id = $1::uuid and id = any($2::uuid[])`,
+        [c.empresa_id, productoIds]
+      );
+      const productosById = new Map<string, MercProducto>();
+      for (const row of pRes.rows) {
+        productosById.set(String(row.id), {
+          id: String(row.id),
+          nombre: String(row.nombre),
+          costo_unitario: Number(row.costo_unitario) || 0,
+          precio_unitario: Number(row.precio_unitario) || 0,
+          comision_unitaria: Number(row.comision_unitaria) || 0,
+          precio_mayorista_6: Number(row.precio_mayorista_6) || 0,
+          comision_mayorista_6: Number(row.comision_mayorista_6) || 0,
+          precio_mayorista_12: Number(row.precio_mayorista_12) || 0,
+          comision_mayorista_12: Number(row.comision_mayorista_12) || 0,
+          tiene_mayorista: !!row.tiene_mayorista,
+          activo: !!row.activo,
+          orden: Number(row.orden) || 0,
+        });
       }
+
+      const op = calcularOperacion(tipo, input.lineas, productosById);
+      if (op.cantidad_total <= 0) {
+        await client.query("rollback");
+        return { ok: false, error: "sin_cantidades" };
+      }
+
+      const stockRes = await client.query(
+        `select producto_id, stock from ${tS}
+         where empresa_id = $1::uuid and vendedor_id = $2::uuid and producto_id = any($3::uuid[])`,
+        [c.empresa_id, input.vendedor_id, productoIds]
+      );
+      const stockPorProducto = new Map<string, number>();
+      for (const r of stockRes.rows) stockPorProducto.set(String(r.producto_id), Number(r.stock) || 0);
+      for (const l of op.lineas) {
+        const disponible = stockPorProducto.get(l.producto_id) ?? 0;
+        if (l.cantidad > disponible) {
+          await client.query("rollback");
+          const nombre = productosById.get(l.producto_id)?.nombre ?? l.producto_id;
+          return {
+            ok: false,
+            error: `Stock insuficiente para ${nombre}: pediste ${l.cantidad}, hay ${disponible}.`,
+          };
+        }
+      }
+
+      const util = utilidad(monto, op.costo_total, op.comision_total);
+      const fecha = (input.fecha ?? "").trim() || new Date().toISOString().slice(0, 10);
+
+      const insV = await client.query<{ id: string }>(
+        `insert into ${tV}
+          (empresa_id, vendedor_id, fecha, tipo, monto_total_real,
+           costo_total_snapshot, comision_total_snapshot, utilidad_snapshot,
+           notas, creado_por)
+         values ($1::uuid, $2::uuid, $3::date, $4::text, $5::numeric,
+                 $6::numeric, $7::numeric, $8::numeric,
+                 $9::text, $10::uuid)
+         returning id`,
+        [
+          c.empresa_id,
+          input.vendedor_id,
+          fecha,
+          tipo,
+          monto,
+          op.costo_total,
+          op.comision_total,
+          util,
+          input.notas ? String(input.notas).trim() : null,
+          c.user_id,
+        ]
+      );
+      const ventaId = insV.rows[0].id;
+
+      for (const l of op.lineas) {
+        await client.query(
+          `insert into ${tI}
+            (empresa_id, venta_id, producto_id, cantidad,
+             costo_unitario_snapshot, comision_unitaria_snapshot, escala_aplicada)
+           values ($1::uuid, $2::uuid, $3::uuid, $4::int,
+                   $5::numeric, $6::numeric, $7::text)`,
+          [
+            c.empresa_id,
+            ventaId,
+            l.producto_id,
+            l.cantidad,
+            l.costo_unitario_snapshot,
+            l.comision_unitaria_snapshot,
+            l.escala_aplicada,
+          ]
+        );
+      }
+
+      await client.query("commit");
+      return { ok: true, id: ventaId };
+    } catch (e) {
+      try {
+        await client.query("rollback");
+      } catch {}
+      throw e;
+    } finally {
+      client.release();
     }
-
-    const util = utilidad(monto, op.costo_total, op.comision_total);
-    const fecha = (input.fecha ?? "").trim() || new Date().toISOString().slice(0, 10);
-
-    const { data: vRow, error: vErr } = await sb
-      .from("merc_ventas")
-      .insert({
-        empresa_id: c.empresa_id,
-        vendedor_id: input.vendedor_id,
-        fecha,
-        tipo,
-        monto_total_real: monto,
-        costo_total_snapshot: op.costo_total,
-        comision_total_snapshot: op.comision_total,
-        utilidad_snapshot: util,
-        notas: input.notas ? String(input.notas).trim() : null,
-        creado_por: c.user_id,
-      })
-      .select("id")
-      .single();
-    if (vErr) throw vErr;
-    const ventaId = (vRow as { id: string }).id;
-
-    const items = op.lineas.map((l) => ({
-      empresa_id: c.empresa_id,
-      venta_id: ventaId,
-      producto_id: l.producto_id,
-      cantidad: l.cantidad,
-      costo_unitario_snapshot: l.costo_unitario_snapshot,
-      comision_unitaria_snapshot: l.comision_unitaria_snapshot,
-      escala_aplicada: l.escala_aplicada,
-    }));
-    const { error: iErr } = await sb.from("merc_ventas_items").insert(items);
-    if (iErr) {
-      // Rollback manual del header si falló insertar items.
-      await sb.from("merc_ventas").delete().eq("id", ventaId).eq("empresa_id", c.empresa_id);
-      throw iErr;
-    }
-    return { ok: true, id: ventaId };
   } catch (e) {
     console.error(LOG, "registrarVenta", toErr(e));
     return { ok: false, error: toErr(e) };
@@ -345,23 +426,25 @@ export async function registrarRendicion(input: RendicionInput): Promise<{ ok: b
   if (!c) return { ok: false, error: "no_session" };
   if (!input.vendedor_id) return { ok: false, error: "sin_vendedor" };
   try {
-    const sb = await getChatServiceClientForEmpresa(c.empresa_id);
+    const pool = requirePool();
+    const t = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_rendiciones");
     const fecha = (input.fecha ?? "").trim() || new Date().toISOString().slice(0, 10);
-    const { data, error } = await sb
-      .from("merc_rendiciones")
-      .insert({
-        empresa_id: c.empresa_id,
-        vendedor_id: input.vendedor_id,
+    const r = await pool.query<{ id: string }>(
+      `insert into ${t}
+        (empresa_id, vendedor_id, fecha, monto_rendido, comision_pagada, notas, creado_por)
+       values ($1::uuid, $2::uuid, $3::date, $4::numeric, $5::numeric, $6::text, $7::uuid)
+       returning id`,
+      [
+        c.empresa_id,
+        input.vendedor_id,
         fecha,
-        monto_rendido: Number(input.monto_rendido) || 0,
-        comision_pagada: Number(input.comision_pagada) || 0,
-        notas: input.notas ? String(input.notas).trim() : null,
-        creado_por: c.user_id,
-      })
-      .select("id")
-      .single();
-    if (error) throw error;
-    return { ok: true, id: (data as { id: string }).id };
+        Number(input.monto_rendido) || 0,
+        Number(input.comision_pagada) || 0,
+        input.notas ? String(input.notas).trim() : null,
+        c.user_id,
+      ]
+    );
+    return { ok: true, id: r.rows[0].id };
   } catch (e) {
     console.error(LOG, "registrarRendicion", toErr(e));
     return { ok: false, error: toErr(e) };
