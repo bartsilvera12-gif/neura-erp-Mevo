@@ -11,7 +11,7 @@ import type {
 } from "@/lib/mercaderia/types";
 
 function fmtGs(v: number) {
-  return `${(Number(v) || 0).toLocaleString("es-PY")} ₲`;
+  return `Gs. ${(Number(v) || 0).toLocaleString("es-PY")}`;
 }
 function todayYmd() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Asuncion" });
@@ -83,6 +83,12 @@ export default function NuevaVentaClient({
     if (!fecha) return setError("Fecha requerida.");
     const m = Number(monto);
     if (!Number.isFinite(m) || m < 0) return setError("Monto inválido.");
+    if (m === 0) {
+      const ok = window.confirm(
+        "El monto cobrado es 0. La utilidad quedará negativa. ¿Registrar igual?"
+      );
+      if (!ok) return;
+    }
     if (op.lineas.length === 0) return setError("Agregá al menos un producto con cantidad.");
     if (tipo === "simple" && op.lineas.length > 1)
       return setError("Venta simple es solo 1 producto. Usá 'Combo' para varios.");
@@ -188,7 +194,7 @@ export default function NuevaVentaClient({
             ) : null}
           </header>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-[10px] uppercase tracking-[0.1em] text-slate-500">
                   <th className="px-3 py-2 text-left">Producto</th>
@@ -241,10 +247,10 @@ export default function NuevaVentaClient({
                           <div className="mt-0.5 text-[10px] text-slate-400">(sin mayorista)</div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-700">
                         {fmtGs((calc?.costo_unitario_snapshot ?? 0) * l.cantidad)}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-amber-700">
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-amber-700">
                         {fmtGs((calc?.comision_unitaria_snapshot ?? 0) * l.cantidad)}
                       </td>
                       {tipo === "combo" ? (
@@ -270,17 +276,35 @@ export default function NuevaVentaClient({
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="flex flex-col gap-1 text-xs text-slate-600">
-              Monto total real (Gs)
-              <input
-                type="number"
-                min={0}
-                value={monto}
-                onChange={(e) => setMonto(e.target.value)}
-                className="rounded border border-slate-300 px-2 py-1.5 text-right text-sm tabular-nums"
-                placeholder="0"
-              />
-            </label>
+            <div className="flex flex-col gap-1 text-xs text-slate-600">
+              <span>Monto cobrado al cliente (Gs)</span>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  value={monto}
+                  onChange={(e) => setMonto(e.target.value)}
+                  className="flex-1 rounded border border-slate-300 px-2 py-1.5 text-right text-sm tabular-nums"
+                  placeholder={
+                    op.precio_referencia_total > 0
+                      ? `Sugerido: ${op.precio_referencia_total.toLocaleString("es-PY")}`
+                      : "0"
+                  }
+                />
+                {op.precio_referencia_total > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setMonto(String(op.precio_referencia_total))}
+                    className="whitespace-nowrap rounded border border-[#4FAEB2] px-2 py-1 text-xs font-semibold text-[#4FAEB2] hover:bg-[#4FAEB2]/10"
+                  >
+                    Usar {op.precio_referencia_total.toLocaleString("es-PY")}
+                  </button>
+                ) : null}
+              </div>
+              <span className="text-[11px] text-slate-500">
+                Es lo que efectivamente pagó el cliente. Puede ser distinto al precio de referencia si negociaron.
+              </span>
+            </div>
             <label className="flex flex-col gap-1 text-xs text-slate-600">
               Notas (opcional)
               <input
