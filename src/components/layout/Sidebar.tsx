@@ -191,6 +191,20 @@ const MENU_STRUCTURE: MenuItem[] = [
         : [{ label: "Tickets / Comprobantes", href: "/sorteos/tickets", exactMatch: true }],
   },
   {
+    key: "mercaderia",
+    slug: "mercaderia",
+    label: "Mercadería",
+    href: "/mercaderia",
+    icon: Package,
+    children: [
+      { label: "Productos", href: "/mercaderia/productos" },
+      { label: "Vendedores", href: "/mercaderia/vendedores" },
+      { label: "Ventas", href: "/mercaderia/ventas" },
+      { label: "Registrar venta", href: "/mercaderia/nueva-venta" },
+      { label: "Rendiciones", href: "/mercaderia/rendiciones" },
+    ],
+  },
+  {
     key: "etiquetas",
     slug: "etiquetas",
     label: "Etiquetas",
@@ -381,6 +395,7 @@ export default function Sidebar() {
     inventario: true,
     sorteos: true,
     compras: true,
+    mercaderia: true,
   });
   const [cargando, setCargando] = useState(true);
   const [esSuperAdmin, setEsSuperAdmin] = useState(false);
