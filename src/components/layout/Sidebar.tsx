@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -399,6 +399,21 @@ export default function Sidebar() {
   });
   const [cargando, setCargando] = useState(true);
   const [esSuperAdmin, setEsSuperAdmin] = useState(false);
+  /** Rol de mercadería: "admin" ve todo el submenu; "vendedor" solo su vista. */
+  const [mercMode, setMercMode] = useState<"admin" | "vendedor" | null>(null);
+  useEffect(() => {
+    let cancel = false;
+    fetch("/api/mercaderia/me", { credentials: "include", cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancel) return;
+        const m = j?.data?.mode;
+        if (m === "vendedor") setMercMode("vendedor");
+        else if (m === "admin") setMercMode("admin");
+      })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, []);
   /** Filtro visual del menú (no altera permisos ni rutas). */
   const [menuSearchQuery, setMenuSearchQuery] = useState("");
   const { setSidebarReady } = useBoot();
@@ -537,6 +552,25 @@ export default function Sidebar() {
 
   const slugToId = (slug: string) => modulos.find((m) => m.slug === slug)?.id ?? slug;
 
+  /** Aplica overrides dependientes del rol (por ejemplo Mercadería para vendedor). */
+  const withRoleOverrides = useCallback(
+    (item: MenuItem): MenuItem => {
+      if (item.key === "mercaderia" && mercMode === "vendedor") {
+        return {
+          ...item,
+          href: "/mercaderia/mi-stock",
+          children: [
+            { label: "Mi stock", href: "/mercaderia/mi-stock" },
+            { label: "Registrar venta", href: "/mercaderia/nueva-venta" },
+            { label: "Mis ventas", href: "/mercaderia/mis-ventas" },
+          ],
+        };
+      }
+      return item;
+    },
+    [mercMode]
+  );
+
   const favoritosItemsFiltered = useMemo(() => {
     const slugs = new Set(modulos.map((m) => m.slug));
     const idForSlug = (slug: string) => modulos.find((m) => m.slug === slug)?.id ?? slug;
@@ -546,8 +580,8 @@ export default function Sidebar() {
         favoritos.includes(idForSlug(item.slug)) &&
         access(item.slug) &&
         menuItemMatchesQuery(item, menuSearchQuery)
-    );
-  }, [favoritos, menuSearchQuery, modulos, esSuperAdmin]);
+    ).map(withRoleOverrides);
+  }, [favoritos, menuSearchQuery, modulos, esSuperAdmin, withRoleOverrides]);
 
   const mainItemsFiltered = useMemo(() => {
     const slugs = new Set(modulos.map((m) => m.slug));
@@ -558,8 +592,8 @@ export default function Sidebar() {
         !favoritos.includes(idForSlug(item.slug)) &&
         access(item.slug) &&
         menuItemMatchesQuery(item, menuSearchQuery)
-    );
-  }, [favoritos, menuSearchQuery, modulos, esSuperAdmin]);
+    ).map(withRoleOverrides);
+  }, [favoritos, menuSearchQuery, modulos, esSuperAdmin, withRoleOverrides]);
 
   const anyMenuVisible =
     favoritosItemsFiltered.length > 0 ||
