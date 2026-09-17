@@ -10,7 +10,15 @@ function fmtInt(n: number) {
 
 type EditState = Partial<Omit<MercProducto, "id" | "orden">>;
 
-export default function ProductosClient({ inicial }: { inicial: MercProducto[] }) {
+type FiltroEstado = "activos" | "inactivos" | "todos";
+
+export default function ProductosClient({
+  inicial,
+  stockPorProducto = {},
+}: {
+  inicial: MercProducto[];
+  stockPorProducto?: Record<string, number>;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<Record<string, EditState>>({});
@@ -28,11 +36,27 @@ export default function ProductosClient({ inicial }: { inicial: MercProducto[] }
     activo: true,
   });
   const [error, setError] = useState<string | null>(null);
-  const [showInactivos, setShowInactivos] = useState(false);
+  const [filtro, setFiltro] = useState<FiltroEstado>("activos");
 
-  const filtrados = useMemo(
-    () => (showInactivos ? inicial : inicial.filter((p) => p.activo)),
-    [inicial, showInactivos]
+  const conteos = useMemo(() => {
+    let activos = 0;
+    let inactivos = 0;
+    for (const p of inicial) {
+      if (p.activo) activos += 1;
+      else inactivos += 1;
+    }
+    return { activos, inactivos, total: activos + inactivos };
+  }, [inicial]);
+
+  const filtrados = useMemo(() => {
+    if (filtro === "todos") return inicial;
+    if (filtro === "inactivos") return inicial.filter((p) => !p.activo);
+    return inicial.filter((p) => p.activo);
+  }, [inicial, filtro]);
+
+  const stockTotalGlobal = useMemo(
+    () => filtrados.reduce((s, p) => s + (stockPorProducto[p.id] ?? 0), 0),
+    [filtrados, stockPorProducto]
   );
 
   function beginEdit(p: MercProducto) {
@@ -144,16 +168,27 @@ export default function ProductosClient({ inicial }: { inicial: MercProducto[] }
 
   return (
     <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <MiniCard label="Productos activos" value={conteos.activos} />
+        <MiniCard label="Inactivos" value={conteos.inactivos} muted={conteos.inactivos === 0} />
+        <MiniCard label="Stock total (mostrado)" value={stockTotalGlobal} accent />
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex items-center gap-2 text-xs text-slate-600">
-          <input
-            type="checkbox"
-            checked={showInactivos}
-            onChange={(e) => setShowInactivos(e.target.checked)}
-            className="h-3.5 w-3.5 accent-[#4FAEB2]"
-          />
-          Mostrar inactivos
-        </label>
+        <div className="flex items-center gap-2 text-xs text-slate-600">
+          <span className="uppercase tracking-[0.1em] text-slate-500">Ver</span>
+          <select
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value as FiltroEstado)}
+            className="rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+          >
+            <option value="activos">Solo activos ({conteos.activos})</option>
+            <option value="inactivos">Solo inactivos ({conteos.inactivos})</option>
+            <option value="todos">Todos ({conteos.total})</option>
+          </select>
+          <span className="text-slate-400">·</span>
+          <span>Mostrando {filtrados.length}</span>
+        </div>
         <button
           type="button"
           onClick={() => setCreando(true)}
@@ -175,6 +210,7 @@ export default function ProductosClient({ inicial }: { inicial: MercProducto[] }
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/70 text-[10px] uppercase tracking-[0.1em] text-slate-500">
                 <th className="px-3 py-2 text-left">Producto</th>
+                <th className="px-3 py-2 text-right">Stock total</th>
                 <th className="px-3 py-2 text-right">Costo</th>
                 <th className="px-3 py-2 text-right">P. Unit.</th>
                 <th className="px-3 py-2 text-right">Com. Unit.</th>
@@ -199,6 +235,7 @@ export default function ProductosClient({ inicial }: { inicial: MercProducto[] }
                       autoFocus
                     />
                   </td>
+                  <td className="px-3 py-2 text-right text-xs text-slate-400">—</td>
                   {(
                     [
                       "costo_unitario",
@@ -270,6 +307,16 @@ export default function ProductosClient({ inicial }: { inicial: MercProducto[] }
                       ) : (
                         <span className="font-medium text-slate-800">{p.nombre}</span>
                       )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {(() => {
+                        const s = stockPorProducto[p.id] ?? 0;
+                        return (
+                          <span className={s > 0 ? "font-semibold text-slate-800" : "text-slate-400"}>
+                            {fmtInt(s)}
+                          </span>
+                        );
+                      })()}
                     </td>
                     {(
                       [
@@ -362,6 +409,33 @@ export default function ProductosClient({ inicial }: { inicial: MercProducto[] }
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MiniCard({
+  label,
+  value,
+  accent,
+  muted,
+}: {
+  label: string;
+  value: number;
+  accent?: boolean;
+  muted?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+        {label}
+      </div>
+      <div
+        className={`mt-1 text-xl font-semibold tabular-nums ${
+          accent ? "text-[#4FAEB2]" : muted ? "text-slate-400" : "text-slate-900"
+        }`}
+      >
+        {fmtInt(value)}
       </div>
     </div>
   );
