@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { registrarRendicion, type RendicionInput } from "@/lib/mercaderia/server-mutations";
+import { requireAdmin } from "@/lib/mercaderia/guard-api";
 
 export async function POST(request: NextRequest) {
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
   const body = (await request.json().catch(() => ({}))) as Partial<RendicionInput>;
   if (!body?.vendedor_id) {
     return NextResponse.json({ ok: false, error: "vendedor_id requerido" }, { status: 400 });

@@ -1,4 +1,5 @@
 import { listVendedores, listVentas } from "@/lib/mercaderia/server-queries";
+import { requireAdminOrRedirect } from "@/lib/mercaderia/guard-admin";
 import VentasClient from "./VentasClient";
 
 type Sp = Record<string, string | string[] | undefined>;
@@ -15,6 +16,7 @@ export default async function MercaderiaVentasPage({
 }: {
   searchParams?: Sp | Promise<Sp>;
 }) {
+  await requireAdminOrRedirect();
   const sp = await Promise.resolve(searchParams ?? {});
   const vendedorId = pick(sp, "vendedor") ?? null;
   const desde = pick(sp, "desde") ?? null;

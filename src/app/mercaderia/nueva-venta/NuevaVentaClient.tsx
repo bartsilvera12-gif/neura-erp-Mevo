@@ -23,13 +23,17 @@ export default function NuevaVentaClient({
   vendedores,
   productos,
   stock,
+  forcedVendedorId,
 }: {
   vendedores: MercVendedor[];
   productos: MercProducto[];
   stock: MercStockVendedor[];
+  forcedVendedorId?: string;
 }) {
   const router = useRouter();
-  const [vendedorId, setVendedorId] = useState<string>(vendedores[0]?.id ?? "");
+  const [vendedorId, setVendedorId] = useState<string>(
+    forcedVendedorId ?? vendedores[0]?.id ?? ""
+  );
   const [tipo, setTipo] = useState<TipoVenta>("simple");
   const [fecha, setFecha] = useState<string>(todayYmd());
   const [lineas, setLineas] = useState<Linea[]>([{ producto_id: productos[0]?.id ?? "", cantidad: 1 }]);
@@ -117,18 +121,25 @@ export default function NuevaVentaClient({
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="flex flex-col gap-1 text-xs text-slate-600">
               Vendedor
-              <select
-                value={vendedorId}
-                onChange={(e) => setVendedorId(e.target.value)}
-                className="rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-800"
-              >
-                {vendedores.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.nombre}
-                    {v.zona ? ` — ${v.zona}` : ""}
-                  </option>
-                ))}
-              </select>
+              {forcedVendedorId ? (
+                <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-800">
+                  {vendedores[0]?.nombre ?? "—"}
+                  {vendedores[0]?.zona ? ` — ${vendedores[0].zona}` : ""}
+                </div>
+              ) : (
+                <select
+                  value={vendedorId}
+                  onChange={(e) => setVendedorId(e.target.value)}
+                  className="rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-800"
+                >
+                  {vendedores.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.nombre}
+                      {v.zona ? ` — ${v.zona}` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
             <label className="flex flex-col gap-1 text-xs text-slate-600">
               Tipo

@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   getKpisPorVendedor,
   listVentas,
   listVendedores,
 } from "@/lib/mercaderia/server-queries";
+import { getMercRole } from "@/lib/mercaderia/roles";
 
 function ymd(d: Date) {
   return d.toLocaleDateString("en-CA", { timeZone: "America/Asuncion" });
@@ -21,6 +23,9 @@ function fmtGs(v: number | null | undefined) {
 }
 
 export default async function MercaderiaDashboardPage() {
+  const role = await getMercRole();
+  if (role.mode === "vendedor") redirect("/mercaderia/mi-stock");
+  if (role.mode === "none") redirect("/");
   const hoy = today();
   const inicioSemana = daysAgo(6); // últimos 7 días
   const inicioMes = daysAgo(29); // últimos 30 días

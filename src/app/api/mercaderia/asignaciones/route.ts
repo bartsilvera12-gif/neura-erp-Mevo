@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { asignarMercaderia, type AsignacionLinea } from "@/lib/mercaderia/server-mutations";
+import { requireAdmin } from "@/lib/mercaderia/guard-api";
 
 type Body = {
   vendedor_id?: string;
@@ -9,6 +10,8 @@ type Body = {
 };
 
 export async function POST(request: NextRequest) {
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
   const body = (await request.json().catch(() => ({}))) as Body;
   const vendedor = String(body.vendedor_id ?? "").trim();
   if (!vendedor) {
