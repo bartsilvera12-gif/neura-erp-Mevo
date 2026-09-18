@@ -421,6 +421,57 @@ export type RendicionInput = {
   notas?: string | null;
 };
 
+/**
+ * Anular una venta ya registrada. Marca la fila como anulada (soft delete)
+ * y la vista `merc_stock_vendedor_v` deja de contar sus items → el stock
+ * queda como si la venta nunca hubiera existido.
+ *
+ * Se conserva el registro para auditoría; sale de KPIs, dashboard y de los
+ * listados por default. Se puede consultar con `anuladas: "solo_anuladas"`.
+ */
+export async function anularVenta(
+  ventaId: string,
+  opts: { motivo?: string | null; scope?: "admin" | "vendedor"; vendedorIdActor?: string } = {}
+): Promise<{ ok: boolean; error?: string }> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "no_session" };
+  if (!ventaId) return { ok: false, error: "sin_id" };
+  try {
+    const pool = requirePool();
+    const t = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_ventas");
+    // Un vendedor solo puede anular sus propias ventas.
+    const params: unknown[] = [
+      new Date().toISOString(),
+      c.user_id,
+      opts.motivo ? String(opts.motivo).trim().slice(0, 500) : null,
+      ventaId,
+      c.empresa_id,
+    ];
+    let scopeCond = "";
+    if (opts.scope === "vendedor" && opts.vendedorIdActor) {
+      params.push(opts.vendedorIdActor);
+      scopeCond = ` and vendedor_id = $${params.length}::uuid`;
+    }
+    const r = await pool.query(
+      `update ${t}
+          set anulada = true,
+              anulada_at = $1::timestamptz,
+              anulada_por = $2::uuid,
+              motivo_anulacion = coalesce($3::text, motivo_anulacion)
+        where id = $4::uuid
+          and empresa_id = $5::uuid
+          and anulada = false${scopeCond}
+        returning id`,
+      params
+    );
+    if (r.rowCount === 0) return { ok: false, error: "venta_no_encontrada_o_ya_anulada" };
+    return { ok: true };
+  } catch (e) {
+    console.error(LOG, "anularVenta", toErr(e));
+    return { ok: false, error: toErr(e) };
+  }
+}
+
 export async function registrarRendicion(input: RendicionInput): Promise<{ ok: boolean; id?: string; error?: string }> {
   const c = await ctx();
   if (!c) return { ok: false, error: "no_session" };

@@ -49,6 +49,9 @@ export interface MercVenta {
   comision_total_snapshot: number;
   utilidad_snapshot: number;
   notas: string | null;
+  anulada: boolean;
+  anulada_at: string | null;
+  motivo_anulacion: string | null;
   created_at: string;
 }
 

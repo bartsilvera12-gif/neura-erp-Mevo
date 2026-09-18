@@ -222,6 +222,8 @@ export async function listVentas(
     desde?: string | null;
     hasta?: string | null;
     tipo?: "simple" | "combo" | null;
+    /** Por default excluye anuladas. "solo_anuladas" o "incluir" para verlas. */
+    anuladas?: "excluir" | "solo_anuladas" | "incluir";
     limit?: number;
   } = {}
 ): Promise<MercVenta[]> {
@@ -250,12 +252,16 @@ export async function listVentas(
       params.push(filtros.tipo);
       conds.push(`v.tipo = $${params.length}::text`);
     }
+    const modoAnul = filtros.anuladas ?? "excluir";
+    if (modoAnul === "excluir") conds.push("v.anulada = false");
+    else if (modoAnul === "solo_anuladas") conds.push("v.anulada = true");
     const limit = Math.min(500, Math.max(1, filtros.limit ?? 200));
     params.push(limit);
     const r = await pool.query(
       `select v.id, v.vendedor_id, v.fecha, v.tipo, v.monto_total_real,
               v.costo_total_snapshot, v.comision_total_snapshot, v.utilidad_snapshot,
-              v.notas, v.created_at, vend.nombre as vendedor_nombre
+              v.notas, v.anulada, v.anulada_at, v.motivo_anulacion, v.created_at,
+              vend.nombre as vendedor_nombre
          from ${tV} v
          left join ${tVend} vend on vend.id = v.vendedor_id
         where ${conds.join(" and ")}
@@ -274,6 +280,9 @@ export async function listVentas(
       comision_total_snapshot: num(row.comision_total_snapshot),
       utilidad_snapshot: num(row.utilidad_snapshot),
       notas: row.notas ?? null,
+      anulada: !!row.anulada,
+      anulada_at: row.anulada_at ? String(row.anulada_at) : null,
+      motivo_anulacion: row.motivo_anulacion ?? null,
       created_at: String(row.created_at),
     }));
   } catch (e) {
@@ -297,7 +306,8 @@ export async function getVentaConItems(
     const rv = await pool.query(
       `select v.id, v.vendedor_id, v.fecha, v.tipo, v.monto_total_real,
               v.costo_total_snapshot, v.comision_total_snapshot, v.utilidad_snapshot,
-              v.notas, v.created_at, vend.nombre as vendedor_nombre
+              v.notas, v.anulada, v.anulada_at, v.motivo_anulacion, v.created_at,
+              vend.nombre as vendedor_nombre
          from ${tV} v
          left join ${tVend} vend on vend.id = v.vendedor_id
         where v.empresa_id = $1::uuid and v.id = $2::uuid`,
@@ -316,6 +326,9 @@ export async function getVentaConItems(
       comision_total_snapshot: num(row.comision_total_snapshot),
       utilidad_snapshot: num(row.utilidad_snapshot),
       notas: row.notas ?? null,
+      anulada: !!row.anulada,
+      anulada_at: row.anulada_at ? String(row.anulada_at) : null,
+      motivo_anulacion: row.motivo_anulacion ?? null,
       created_at: String(row.created_at),
     };
     const ri = await pool.query(
@@ -426,6 +439,7 @@ export async function getKpisPorVendedor(desde: string, hasta: string): Promise<
          from ${tV} v
          left join ${tVend} vend on vend.id = v.vendedor_id
         where v.empresa_id = $1::uuid
+          and v.anulada = false
           and v.fecha >= $2::date and v.fecha <= $3::date
         group by v.vendedor_id, vend.nombre
         order by vendedor_nombre asc`,

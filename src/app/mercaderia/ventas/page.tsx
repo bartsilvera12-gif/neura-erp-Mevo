@@ -23,11 +23,20 @@ export default async function MercaderiaVentasPage({
   const hasta = pick(sp, "hasta") ?? null;
   const tipoRaw = pick(sp, "tipo");
   const tipo = tipoRaw === "simple" || tipoRaw === "combo" ? tipoRaw : null;
+  const anulRaw = pick(sp, "anuladas");
+  const anuladas: "excluir" | "solo_anuladas" | "incluir" =
+    anulRaw === "solo_anuladas" || anulRaw === "incluir" ? anulRaw : "excluir";
 
   const [vendedores, ventas] = await Promise.all([
     listVendedores(false),
-    listVentas({ vendedorId, desde, hasta, tipo, limit: 300 }),
+    listVentas({ vendedorId, desde, hasta, tipo, anuladas, limit: 300 }),
   ]);
 
-  return <VentasClient vendedores={vendedores} ventas={ventas} filtros={{ vendedorId, desde, hasta, tipo }} />;
+  return (
+    <VentasClient
+      vendedores={vendedores}
+      ventas={ventas}
+      filtros={{ vendedorId, desde, hasta, tipo, anuladas }}
+    />
+  );
 }
