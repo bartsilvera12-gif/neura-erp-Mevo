@@ -188,7 +188,10 @@ const MENU_STRUCTURE: MenuItem[] = [
     children:
       process.env.NEXT_PUBLIC_NEURA_CLIENT_SCHEMA === "elpapustore_erp"
         ? undefined
-        : [{ label: "Tickets / Comprobantes", href: "/sorteos/tickets", exactMatch: true }],
+        : [
+            { label: "Tickets / Comprobantes", href: "/sorteos/tickets", exactMatch: true },
+            { label: "Comprobantes del día", href: "/sorteos/comprobantes-del-dia", exactMatch: true },
+          ],
   },
   {
     key: "mercaderia",
