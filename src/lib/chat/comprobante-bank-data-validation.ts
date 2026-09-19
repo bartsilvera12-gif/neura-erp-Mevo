@@ -213,8 +213,25 @@ function supplementBankDetailsFromFullText(
   const titExp = expected.titular.trim();
   if (titExp) {
     const nt = normalizeBankText(titExp);
-    const inText = nt.length >= 3 && mergedNorm.includes(nt);
-    if (inText && (!out.titular || !titularMatches(titExp, out.titular))) {
+    /**
+     * Contigua ("marcos valdez" aparece tal cual) sigue valiendo como antes.
+     * Pero muchos bancos escriben "Enviada a APELLIDO NOMBRES" (UENO), o incluyen
+     * segundo nombre / segundo apellido entre medio, y ahí el `includes` estricto
+     * fallaba. Se acepta también cuando todas las palabras del nombre esperado
+     * (>=3 letras) están presentes en el texto, en cualquier orden. Es el mismo
+     * criterio que `titularMatches` aplica al comparar, así que no relaja nada
+     * que no habría aceptado igual una vez extraído.
+     */
+    const inTextContiguous = nt.length >= 3 && mergedNorm.includes(nt);
+    let inTextByWords = false;
+    if (!inTextContiguous) {
+      const expectedWords = nt.split(" ").filter((w) => w.length >= 3);
+      if (expectedWords.length >= 2) {
+        const textWords = new Set(mergedNorm.split(" ").filter((w) => w.length >= 3));
+        inTextByWords = expectedWords.every((w) => textWords.has(w));
+      }
+    }
+    if ((inTextContiguous || inTextByWords) && (!out.titular || !titularMatches(titExp, out.titular))) {
       out.titular = titExp;
     }
   }
