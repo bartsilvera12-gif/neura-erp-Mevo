@@ -1009,6 +1009,227 @@ export function invalidateSorteosListCachesForEmpresa(empresaId: string, dataSch
   }
 }
 
+export type GanadorPorCupon = {
+  numero_cupon: string;
+  nombre_participante: string;
+  documento: string | null;
+  whatsapp_numero: string;
+  ciudad: string | null;
+  sorteo_nombre: string;
+  numero_orden: number;
+  cantidad_boletos: number;
+  estado_pago: SorteoEntradaEstadoPago;
+  created_at: string;
+};
+
+export type GanadorPorCuponResult = {
+  ganador: GanadorPorCupon | null;
+  error: string | null;
+  transient_error?: boolean;
+};
+
+function mapEntradaCuponRowToGanador(
+  r: Record<string, unknown>,
+  numeroCupon: string,
+  sorteoNombre: string,
+  ciudad: string | null
+): GanadorPorCupon {
+  const est = r.estado_pago;
+  const estado: SorteoEntradaEstadoPago =
+    est === "pendiente" || est === "pendiente_revision" || est === "confirmado" || est === "rechazado"
+      ? est
+      : "confirmado";
+  return {
+    numero_cupon: numeroCupon,
+    nombre_participante: String(r.nombre_participante ?? ""),
+    documento:
+      typeof r.documento === "string" && r.documento.trim() ? r.documento.trim() : null,
+    whatsapp_numero: String(r.whatsapp_numero ?? ""),
+    ciudad: ciudad && ciudad.trim() ? ciudad.trim() : null,
+    sorteo_nombre: sorteoNombre || "—",
+    numero_orden: typeof r.numero_orden === "number" ? r.numero_orden : 0,
+    cantidad_boletos: Number(r.cantidad_boletos ?? 0),
+    estado_pago: estado,
+    created_at: String(r.created_at ?? ""),
+  };
+}
+
+async function fetchGanadorPorCuponPgDirect(
+  empresaId: string,
+  dataSchema: string,
+  numeroCupon: string,
+  sorteoId: string | null
+): Promise<GanadorPorCuponResult> {
+  const pool = getChatPostgresPool();
+  if (!pool) {
+    return { ganador: null, error: "Falta SUPABASE_DB_URL o DIRECT_URL en el servidor." };
+  }
+
+  const sch = assertAllowedChatDataSchema(dataSchema);
+  const tEnt = quoteSchemaTable(sch, "sorteo_entradas");
+  const tCup = quoteSchemaTable(sch, "sorteo_cupones");
+  const tSort = quoteSchemaTable(sch, "sorteos");
+  const tCli = quoteSchemaTable(sch, "clientes");
+  const tFlowData = quoteSchemaTable(sch, "chat_flow_data");
+
+  const numericValue = /^[0-9]+$/.test(numeroCupon) ? Number(numeroCupon) : null;
+
+  const params: unknown[] = [empresaId, numeroCupon];
+  let sorteoCond = "";
+  if (sorteoId) {
+    params.push(sorteoId);
+    sorteoCond = `AND c.sorteo_id = $${params.length}::uuid`;
+  }
+  let numericCond = "";
+  if (numericValue != null) {
+    params.push(numericValue);
+    numericCond = `OR (c.coupon_number_value IS NOT NULL AND c.coupon_number_value = $${params.length}::bigint)`;
+  }
+
+  const sql = `
+    SELECT se.*, sort.nombre AS sorteo_nombre,
+      COALESCE(
+        (SELECT NULLIF(TRIM(fd.field_value), '')
+           FROM ${tFlowData} fd
+           WHERE fd.conversation_id = se.chat_conversation_id
+             AND fd.empresa_id = se.empresa_id
+             AND fd.field_name = 'ciudad'
+             AND NULLIF(TRIM(fd.field_value), '') IS NOT NULL
+           ORDER BY fd.created_at DESC
+           LIMIT 1),
+        NULLIF(TRIM(cl.ciudad), '')
+      ) AS ciudad
+    FROM ${tCup} c
+    JOIN ${tEnt} se ON se.id = c.entrada_id AND se.empresa_id = c.empresa_id
+    LEFT JOIN ${tSort} sort ON sort.id = se.sorteo_id AND sort.empresa_id = se.empresa_id
+    LEFT JOIN ${tCli} cl ON cl.id = se.cliente_id AND cl.empresa_id = se.empresa_id
+    WHERE c.empresa_id = $1::uuid
+      ${sorteoCond}
+      AND (c.numero_cupon = $2::text ${numericCond})
+    ORDER BY se.created_at DESC NULLS LAST
+    LIMIT 1
+  `;
+  const res = await pool.query(sql, params);
+  const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined;
+  if (!row) return { ganador: null, error: null };
+
+  const ciudad = typeof row.ciudad === "string" ? row.ciudad : null;
+  const sorteoNombre = typeof row.sorteo_nombre === "string" ? row.sorteo_nombre : "—";
+  return {
+    ganador: mapEntradaCuponRowToGanador(normalizeRowTimestamps(row), numeroCupon, sorteoNombre, ciudad),
+    error: null,
+  };
+}
+
+async function fetchGanadorPorCuponPostgrest(
+  empresaId: string,
+  numeroCupon: string,
+  sorteoId: string | null
+): Promise<GanadorPorCuponResult> {
+  const sb = await getChatServiceClientForEmpresa(empresaId);
+  const numericValue = /^[0-9]+$/.test(numeroCupon) ? Number(numeroCupon) : null;
+
+  let cq = sb
+    .from("sorteo_cupones")
+    .select("numero_cupon, entrada_id, sorteo_id, coupon_number_value")
+    .eq("empresa_id", empresaId);
+  if (sorteoId) cq = cq.eq("sorteo_id", sorteoId);
+  cq =
+    numericValue != null
+      ? cq.or(`numero_cupon.eq.${numeroCupon},coupon_number_value.eq.${numericValue}`)
+      : cq.eq("numero_cupon", numeroCupon);
+
+  const { data: cupones, error: eCup } = await cq.limit(5);
+  if (eCup) return { ganador: null, error: eCup.message };
+  const cupon = (cupones ?? [])[0] as { numero_cupon?: string; entrada_id?: string } | undefined;
+  if (!cupon?.entrada_id) return { ganador: null, error: null };
+
+  const { data: entrada, error: eEnt } = await sb
+    .from("sorteo_entradas")
+    .select("*")
+    .eq("empresa_id", empresaId)
+    .eq("id", cupon.entrada_id)
+    .maybeSingle();
+  if (eEnt) return { ganador: null, error: eEnt.message };
+  if (!entrada) return { ganador: null, error: null };
+
+  const er = entrada as Record<string, unknown>;
+
+  let sorteoNombre = "—";
+  if (er.sorteo_id) {
+    const { data: sos } = await sb
+      .from("sorteos")
+      .select("nombre")
+      .eq("empresa_id", empresaId)
+      .eq("id", String(er.sorteo_id))
+      .maybeSingle();
+    if (sos && typeof (sos as { nombre?: unknown }).nombre === "string") {
+      sorteoNombre = (sos as { nombre: string }).nombre;
+    }
+  }
+
+  const ciudadByEntrada = await resolveCiudadByEntradaPostgrest(sb, empresaId, [er]);
+  const ciudad = ciudadByEntrada[String(er.id)] ?? null;
+
+  return {
+    ganador: mapEntradaCuponRowToGanador(
+      normalizeRowTimestamps(er),
+      typeof cupon.numero_cupon === "string" ? cupon.numero_cupon : numeroCupon,
+      sorteoNombre,
+      ciudad
+    ),
+    error: null,
+  };
+}
+
+/**
+ * Busca al comprador dueño de un número de cupón (búsqueda exacta, o por valor
+ * numérico si el número se guardó con ceros a la izquierda). Devuelve el ganador
+ * con nombre, ciudad, cédula y celular para el sorteo/ganador por número de boleta.
+ */
+export async function fetchGanadorPorCuponServer(
+  numeroCuponRaw: string,
+  sorteoId?: string | null
+): Promise<GanadorPorCuponResult> {
+  const numeroCupon = numeroCuponRaw.trim();
+  if (!numeroCupon) return { ganador: null, error: "Ingresá un número de boleta." };
+
+  const empresaId = await getEmpresaIdForCurrentUserServer();
+  if (!empresaId) return { ganador: null, error: "Sin sesión o empresa." };
+
+  const dataSchema = await fetchDataSchemaForEmpresaId(empresaId);
+  const sid = sorteoId?.trim() || null;
+
+  try {
+    if (isLikelyUnexposedTenantChatSchema(dataSchema)) {
+      if (!getChatPostgresConnectionString()) {
+        return {
+          ganador: null,
+          error: "Tenant no expuesto en PostgREST: configure SUPABASE_DB_URL o DIRECT_URL.",
+        };
+      }
+      return await fetchGanadorPorCuponPgDirect(empresaId, dataSchema, numeroCupon, sid);
+    }
+    return await fetchGanadorPorCuponPostgrest(empresaId, numeroCupon, sid);
+  } catch (e) {
+    const msg =
+      e && typeof e === "object" && "message" in e
+        ? String((e as { message: unknown }).message)
+        : String(e);
+    const exhausted = isPgPoolExhaustionMessage(msg);
+    console.error("[sorteos][ganador-por-cupon]", "error", {
+      empresa_id: empresaId,
+      schema: dataSchema,
+      error: msg.slice(0, 400),
+    });
+    return {
+      ganador: null,
+      error: exhausted ? "Servidor de base de datos saturado; reintentá en unos segundos." : msg,
+      transient_error: exhausted,
+    };
+  }
+}
+
 export async function fetchSorteoCuponesOrdenesServer(
   params?: SorteoEntradasListParams
 ): Promise<SorteoCuponesServerResult> {
