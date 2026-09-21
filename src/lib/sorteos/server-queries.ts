@@ -13,6 +13,7 @@ import {
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { getEmpresaIdForCurrentUserServer } from "@/lib/supabase/empresa-data-server";
 import { getChatServiceClientForEmpresa } from "@/lib/supabase/chat-service-role-empresa";
+import { asuncionDateStartUtc, asuncionDateEndExclusiveUtc } from "@/lib/sorteos/kpis-time-bounds";
 
 const SORTEOS_QUERY_SOURCE = "src/lib/sorteos/server-queries.ts";
 
@@ -27,6 +28,10 @@ type NormalizedListParams = {
   sorteoId: string | null;
   q: string | null;
   estadoPago: SorteoEntradaEstadoPago | null;
+  /** Instante UTC (ISO) del inicio del rango de fechas de creación; null = sin límite inferior. */
+  desdeUtc: string | null;
+  /** Instante UTC (ISO) exclusivo (inicio del día siguiente a "hasta"); null = sin límite superior. */
+  hastaUtc: string | null;
 };
 
 const listCache = new Map<
@@ -47,15 +52,17 @@ function normalizeListParams(raw?: SorteoEntradasListParams): NormalizedListPara
   const sorteoId = raw?.sorteoId?.trim() || null;
   const q = raw?.q?.trim() || null;
   const estadoPago = raw?.estadoPago ?? null;
-  return { page, limit, offset, sorteoId, q, estadoPago };
+  const desdeUtc = raw?.desde ? asuncionDateStartUtc(raw.desde.trim()) : null;
+  const hastaUtc = raw?.hasta ? asuncionDateEndExclusiveUtc(raw.hasta.trim()) : null;
+  return { page, limit, offset, sorteoId, q, estadoPago, desdeUtc, hastaUtc };
 }
 
 function cacheKeyEntradas(empresaId: string, schema: string, p: NormalizedListParams) {
-  return `ent:${schema}:${empresaId}:${p.page}:${p.limit}:${p.sorteoId ?? ""}:${p.q ?? ""}:${p.estadoPago ?? ""}`;
+  return `ent:${schema}:${empresaId}:${p.page}:${p.limit}:${p.sorteoId ?? ""}:${p.q ?? ""}:${p.estadoPago ?? ""}:${p.desdeUtc ?? ""}:${p.hastaUtc ?? ""}`;
 }
 
 function cacheKeyCupones(empresaId: string, schema: string, p: NormalizedListParams) {
-  return `cup:${schema}:${empresaId}:${p.page}:${p.limit}:${p.sorteoId ?? ""}:${p.q ?? ""}:${p.estadoPago ?? ""}`;
+  return `cup:${schema}:${empresaId}:${p.page}:${p.limit}:${p.sorteoId ?? ""}:${p.q ?? ""}:${p.estadoPago ?? ""}:${p.desdeUtc ?? ""}:${p.hastaUtc ?? ""}`;
 }
 
 function normalizeRowTimestamps<T extends Record<string, unknown>>(row: T): T {
@@ -81,6 +88,10 @@ export type SorteoEntradasListParams = {
   sorteoId?: string | null;
   q?: string | null;
   estadoPago?: SorteoEntradaEstadoPago | null;
+  /** Día calendario 'YYYY-MM-DD' (Asunción) desde el cual filtrar por fecha de creación. */
+  desde?: string | null;
+  /** Día calendario 'YYYY-MM-DD' (Asunción) hasta el cual filtrar (inclusive). */
+  hasta?: string | null;
 };
 
 export type SorteoEntradasServerResult = {
@@ -195,6 +206,16 @@ function buildEntradaWhereParts(
       );
     }
     params.push(term);
+    i++;
+  }
+  if (p.desdeUtc) {
+    conds.push(`${a}created_at >= $${i}::timestamptz`);
+    params.push(p.desdeUtc);
+    i++;
+  }
+  if (p.hastaUtc) {
+    conds.push(`${a}created_at < $${i}::timestamptz`);
+    params.push(p.hastaUtc);
     i++;
   }
   if (p.estadoPago) {
@@ -509,6 +530,8 @@ async function fetchSorteoEntradasPostgrest(
   let qb = sb.from("sorteo_entradas").select("*", { count: "exact" }).eq("empresa_id", empresaId);
 
   if (listParams.sorteoId) qb = qb.eq("sorteo_id", listParams.sorteoId);
+  if (listParams.desdeUtc) qb = qb.gte("created_at", listParams.desdeUtc);
+  if (listParams.hastaUtc) qb = qb.lt("created_at", listParams.hastaUtc);
   /** Sin filtro explícito, las rechazadas quedan fuera del listado (ver buildEntradaWhereParts). */
   if (listParams.estadoPago) qb = qb.eq("estado_pago", listParams.estadoPago);
   else qb = qb.neq("estado_pago", "rechazado");
@@ -662,6 +685,8 @@ async function fetchSorteoCuponesOrdenesPostgrest(
     .eq("empresa_id", empresaId);
 
   if (listParams.sorteoId) qb = qb.eq("sorteo_id", listParams.sorteoId);
+  if (listParams.desdeUtc) qb = qb.gte("created_at", listParams.desdeUtc);
+  if (listParams.hastaUtc) qb = qb.lt("created_at", listParams.hastaUtc);
   /** Sin filtro explícito, las rechazadas quedan fuera del listado (ver buildEntradaWhereParts). */
   if (listParams.estadoPago) qb = qb.eq("estado_pago", listParams.estadoPago);
   else qb = qb.neq("estado_pago", "rechazado");

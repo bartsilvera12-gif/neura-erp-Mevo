@@ -10,6 +10,29 @@ export function asuncionDayBoundsUtc(now = new Date()): { start: string; end: st
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
+/**
+ * Convierte un día calendario 'YYYY-MM-DD' de Asunción al instante UTC de su
+ * medianoche (00:00 -04:00). Devuelve null si el string no es una fecha válida.
+ */
+export function asuncionDateStartUtc(ymd: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const d = new Date(`${ymd}T00:00:00-04:00`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
+ * Instante UTC del inicio del día SIGUIENTE a 'YYYY-MM-DD' (Asunción). Pensado
+ * para usar con el operador `<`, de modo que el rango [desde, hasta] sea
+ * inclusivo del día "hasta" completo.
+ */
+export function asuncionDateEndExclusiveUtc(ymd: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const d = new Date(`${ymd}T00:00:00-04:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString();
+}
+
 export function asuncionMonthBoundsUtc(now = new Date()): { start: string; end: string } {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Asuncion",
