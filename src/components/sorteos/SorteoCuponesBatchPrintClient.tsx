@@ -37,6 +37,8 @@ export default function SorteoCuponesBatchPrintClient({
   selectedSorteoId,
   estadoParam,
   qParam,
+  desdeParam,
+  hastaParam,
   totalCount,
 }: {
   rows: SorteoCuponOrdenRow[];
@@ -44,6 +46,9 @@ export default function SorteoCuponesBatchPrintClient({
   selectedSorteoId: string | null;
   estadoParam?: string;
   qParam?: string;
+  /** Rango de fechas (día calendario 'YYYY-MM-DD') del filtro actual. */
+  desdeParam?: string;
+  hastaParam?: string;
   totalCount: number;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -142,7 +147,12 @@ export default function SorteoCuponesBatchPrintClient({
       return;
     }
     openPrintWindow(
-      printUrl(selectedSorteoId, { estado: estadoParam ?? "", q: qParam ?? "" })
+      printUrl(selectedSorteoId, {
+        estado: estadoParam ?? "",
+        q: qParam ?? "",
+        fecha_desde: desdeParam ?? "",
+        fecha_hasta: hastaParam ?? "",
+      })
     );
   }
 

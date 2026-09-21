@@ -33,6 +33,8 @@ function buildQuery(
     q: pickStr(sp, "q"),
     sorteo_id: pickStr(sp, "sorteo_id"),
     estado: pickStr(sp, "estado"),
+    desde: pickStr(sp, "desde"),
+    hasta: pickStr(sp, "hasta"),
   };
   for (const [k, v] of Object.entries({ ...base, ...patch })) {
     if (v && v.length > 0) p.set(k, v);
@@ -51,6 +53,11 @@ export default async function SorteoCuponesPage({
   const q = pickStr(sp, "q")?.trim() || undefined;
   const sorteoId = pickStr(sp, "sorteo_id")?.trim() || undefined;
   const estadoRaw = pickStr(sp, "estado")?.trim();
+  const isYmd = (v: string | undefined): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const desdeRaw = pickStr(sp, "desde")?.trim();
+  const hastaRaw = pickStr(sp, "hasta")?.trim();
+  const desde = isYmd(desdeRaw) ? desdeRaw : undefined;
+  const hasta = isYmd(hastaRaw) ? hastaRaw : undefined;
   /** Cupones: solo estos tres estados en el filtro (sin `pendiente`). */
   const estadoPago: SorteoEntradaEstadoPago | undefined =
     estadoRaw === "pendiente_revision" || estadoRaw === "confirmado" || estadoRaw === "rechazado"
@@ -71,6 +78,8 @@ export default async function SorteoCuponesPage({
     q: q ?? null,
     sorteoId: selectedSorteoId,
     estadoPago: estadoPago ?? null,
+    desde: desde ?? null,
+    hasta: hasta ?? null,
   };
 
   const {
@@ -179,6 +188,26 @@ export default async function SorteoCuponesPage({
               <option value="all">Todos los sorteos</option>
             </select>
           </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Fecha desde</span>
+            <input
+              type="date"
+              name="desde"
+              defaultValue={desde ?? ""}
+              max={hasta ?? undefined}
+              className="w-[160px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Fecha hasta</span>
+            <input
+              type="date"
+              name="hasta"
+              defaultValue={hasta ?? ""}
+              min={desde ?? undefined}
+              className="w-[160px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20"
+            />
+          </label>
           <SorteoCuponesEstadoPagoFilter />
           <button
             type="submit"
@@ -209,6 +238,11 @@ export default async function SorteoCuponesPage({
 
       <div className="text-sm text-slate-600">
         Mostrando página {pageOut} de {totalPages} · {total_count} órdenes con cupón · hasta {limit} por página
+        {desde || hasta ? (
+          <span className="ml-1 font-medium text-slate-700">
+            · Período: {desde ?? "inicio"} → {hasta ?? "hoy"}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -235,6 +269,8 @@ export default async function SorteoCuponesPage({
         selectedSorteoId={selectedSorteoId}
         estadoParam={estadoPago}
         qParam={q}
+        desdeParam={desde}
+        hastaParam={hasta}
         totalCount={total_count}
       />
     </div>
