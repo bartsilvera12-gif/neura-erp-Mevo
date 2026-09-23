@@ -20,10 +20,24 @@ function isYmd(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
+/**
+ * Paraguay pasó a UTC-3 permanente en 2024. No dependemos del tzdata del
+ * runtime (Coolify puede tener una versión desactualizada que devuelve -4).
+ */
+const PY_OFFSET_HOURS = -3;
+const PY_OFFSET_MS = PY_OFFSET_HOURS * 60 * 60 * 1000;
+
 function ymdAsuncionToUtcBounds(ymd: string): { desde: string; hasta: string } {
-  const desde = new Date(`${ymd}T00:00:00-04:00`).toISOString();
-  const hasta = new Date(`${ymd}T23:59:59.999-04:00`).toISOString();
+  const desde = new Date(`${ymd}T00:00:00-03:00`).toISOString();
+  const hasta = new Date(`${ymd}T23:59:59.999-03:00`).toISOString();
   return { desde, hasta };
+}
+
+function formatHoraPy(isoUtc: string): string {
+  const utc = new Date(isoUtc);
+  const local = new Date(utc.getTime() + PY_OFFSET_MS);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}`;
 }
 
 export async function GET(request: NextRequest) {
@@ -35,7 +49,7 @@ export async function GET(request: NextRequest) {
   const fechaRaw = (url.searchParams.get("fecha") ?? "").trim();
   const fecha = fechaRaw && isYmd(fechaRaw)
     ? fechaRaw
-    : new Date().toLocaleDateString("en-CA", { timeZone: "America/Asuncion" });
+    : new Date(Date.now() + PY_OFFSET_MS).toISOString().slice(0, 10);
 
   try {
     const pool = getChatPostgresPool();
@@ -103,14 +117,7 @@ export async function GET(request: NextRequest) {
     );
 
     const rows = r.rows.map((row) => {
-      const dt = new Date(row.created_at as string);
-      const hora = dt.toLocaleTimeString("es-PY", {
-        timeZone: "America/Asuncion",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      });
+      const hora = formatHoraPy(String(row.created_at));
       const flowNombre = String((row.flow_nombre as string | null) ?? "").trim();
       const flowApellido = String((row.flow_apellido as string | null) ?? "").trim();
       const nombreFlow = [flowNombre, flowApellido].filter(Boolean).join(" ").trim();
