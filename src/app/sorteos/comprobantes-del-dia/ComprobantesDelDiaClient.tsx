@@ -110,8 +110,10 @@ export default function ComprobantesDelDiaClient() {
           <ul className="mt-2 list-disc pl-5 space-y-1">
             <li><strong>Hora</strong>: la hora en que el bot recibió y validó el comprobante (zona Paraguay).</li>
             <li><strong>Monto</strong>: el monto que detectó el OCR.</li>
-            <li><strong>Titular (según OCR)</strong>: nombre que aparece en el comprobante.</li>
-            <li><strong>Teléfono</strong> y <strong>Nombre en agenda</strong>: cliente que lo envió por WhatsApp.</li>
+            <li><strong>Cliente</strong>: el nombre + apellido que la persona <em>cargó en el bot al comprar</em>. Si todavía no lo cargó, se usa el nombre de agenda de WhatsApp.</li>
+            <li><strong>Cédula</strong> y <strong>Ciudad</strong>: lo que ingresó en el bot al comprar (si lo llegó a cargar).</li>
+            <li><strong>Teléfono</strong> y <strong>Nombre en agenda WhatsApp</strong>: dato de contacto crudo desde WhatsApp.</li>
+            <li><strong>Titular (según OCR)</strong>: nombre del receptor que aparece en el comprobante (dueño de la cuenta destino).</li>
             <li><strong>Estado</strong> y <strong>motivo</strong>: si fue aprobado, rechazado, pendiente de revisión, etc.</li>
             <li><strong>Banco</strong>, <strong>Nº comprobante</strong>, <strong>Fecha y hora en el comprobante</strong>: datos leídos por OCR del propio comprobante.</li>
             <li><strong>URL del comprobante</strong>: link directo a la imagen guardada.</li>
