@@ -10,9 +10,11 @@ import { buildXlsxBuffer, xlsxResponseHeaders } from "@/lib/excel/export";
  * Devuelve un .xlsx con las validaciones de comprobantes de ese día
  * (calendario America/Asuncion), pensado para conciliar contra el banco.
  *
- * Columnas: hora, monto detectado por OCR, nombre en el comprobante,
- * teléfono del cliente, nombre en agenda, estado, banco, referencia,
- * URL del comprobante.
+ * La columna "Cliente" prioriza el nombre + apellido que la persona cargó
+ * en el bot al comprar su boleta (chat_flow_data). Muchos usuarios tienen
+ * emojis o alias en la agenda de WhatsApp, así que el nombre del flow es
+ * lo que sirve para identificarlos. Se usa el nombre de agenda como
+ * fallback si el flow todavía no tiene el dato cargado.
  */
 function isYmd(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -47,7 +49,12 @@ export async function GET(request: NextRequest) {
     const tCv = quoteSchemaTable(schema, "chat_comprobante_validaciones");
     const tConv = quoteSchemaTable(schema, "chat_conversations");
     const tCt = quoteSchemaTable(schema, "chat_contacts");
+    const tFd = quoteSchemaTable(schema, "chat_flow_data");
     const { desde, hasta } = ymdAsuncionToUtcBounds(fecha);
+    // Subqueries laterales para tomar el ultimo valor no vacio de cada campo
+    // relevante del flow para esa conversacion (nombre, apellido, cedula, ciudad).
+    // Cubrimos las variantes usadas por distintos flujos ("nombre" | "primer_nombre",
+    // etc). Ordenamos por created_at desc para tomar el dato mas reciente.
     const r = await pool.query(
       `select cv.created_at,
               cv.monto_validacion_ocr_gs,
@@ -60,7 +67,31 @@ export async function GET(request: NextRequest) {
               cv.bank_val_titular_ocr,
               cv.comprobante_url,
               cc.name as contacto_nombre,
-              cc.phone_number
+              cc.phone_number,
+              (select fd.field_value from ${tFd} fd
+                where fd.conversation_id = cv.conversation_id
+                  and lower(fd.field_name) in ('nombre','primer_nombre','nombre_completo','nombre_y_apellido')
+                  and coalesce(nullif(btrim(fd.field_value), ''), null) is not null
+                order by fd.created_at desc
+                limit 1) as flow_nombre,
+              (select fd.field_value from ${tFd} fd
+                where fd.conversation_id = cv.conversation_id
+                  and lower(fd.field_name) in ('apellido','primer_apellido')
+                  and coalesce(nullif(btrim(fd.field_value), ''), null) is not null
+                order by fd.created_at desc
+                limit 1) as flow_apellido,
+              (select fd.field_value from ${tFd} fd
+                where fd.conversation_id = cv.conversation_id
+                  and lower(fd.field_name) in ('cedula','documento','nro_documento','numero_documento','ci')
+                  and coalesce(nullif(btrim(fd.field_value), ''), null) is not null
+                order by fd.created_at desc
+                limit 1) as flow_cedula,
+              (select fd.field_value from ${tFd} fd
+                where fd.conversation_id = cv.conversation_id
+                  and lower(fd.field_name) = 'ciudad'
+                  and coalesce(nullif(btrim(fd.field_value), ''), null) is not null
+                order by fd.created_at desc
+                limit 1) as flow_ciudad
          from ${tCv} cv
          left join ${tConv} conv on conv.id = cv.conversation_id
          left join ${tCt} cc on cc.id = conv.contact_id
@@ -80,12 +111,20 @@ export async function GET(request: NextRequest) {
         second: "2-digit",
         hour12: false,
       });
+      const flowNombre = String((row.flow_nombre as string | null) ?? "").trim();
+      const flowApellido = String((row.flow_apellido as string | null) ?? "").trim();
+      const nombreFlow = [flowNombre, flowApellido].filter(Boolean).join(" ").trim();
+      const nombreAgenda = String((row.contacto_nombre as string | null) ?? "").trim();
+      const cliente = nombreFlow || nombreAgenda;
       return {
         hora,
         monto: Number(row.monto_validacion_ocr_gs) || 0,
-        titular_ocr: (row.bank_val_titular_ocr as string | null) ?? "",
+        cliente,
+        nombre_agenda: nombreAgenda,
+        cedula: String((row.flow_cedula as string | null) ?? "").trim(),
+        ciudad: String((row.flow_ciudad as string | null) ?? "").trim(),
+        titular_ocr: String((row.bank_val_titular_ocr as string | null) ?? "").trim(),
         telefono: (row.phone_number as string | null) ?? "",
-        contacto_nombre: (row.contacto_nombre as string | null) ?? "",
         estado: (row.estado_validacion as string | null) ?? "",
         motivo: (row.motivo_validacion as string | null) ?? "",
         banco: (row.ocr_banco as string | null) ?? "",
@@ -101,9 +140,12 @@ export async function GET(request: NextRequest) {
       [
         { header: "Hora", value: (r) => r.hora, width: 10 },
         { header: "Monto (Gs.)", value: (r) => r.monto, width: 14 },
-        { header: "Titular (según OCR)", value: (r) => r.titular_ocr, width: 32 },
+        { header: "Cliente", value: (r) => r.cliente, width: 28 },
+        { header: "Cédula", value: (r) => r.cedula, width: 12 },
+        { header: "Ciudad", value: (r) => r.ciudad, width: 18 },
         { header: "Teléfono", value: (r) => r.telefono, width: 15 },
-        { header: "Nombre en agenda", value: (r) => r.contacto_nombre, width: 24 },
+        { header: "Nombre en agenda WhatsApp", value: (r) => r.nombre_agenda, width: 24 },
+        { header: "Titular (según OCR)", value: (r) => r.titular_ocr, width: 28 },
         { header: "Estado", value: (r) => r.estado, width: 14 },
         { header: "Motivo", value: (r) => r.motivo, width: 24 },
         { header: "Banco (OCR)", value: (r) => r.banco, width: 16 },
