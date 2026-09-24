@@ -67,6 +67,58 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
 
     const tplComponents = (campaign as { template_components_json?: unknown }).template_components_json ?? [];
     const requiredSlots = extractBodyPlaceholderKeysOrdered(tplComponents as unknown[]);
+    const needsHeader = templateSnapshotHasHeaderImage(tplComponents);
+
+    let mappingErrors = 0;
+    const ts = new Date().toISOString();
+
+    // Fast path: plantilla sin variables y sin header image por fila → no hace
+    // falta leer `row_payload_json` de cada destinatario (con 10k+ filas eso
+    // pega 12 MB por la red y Cloudflare cortaba con 520). Marcamos todos como
+    // "pending" en un solo UPDATE y salimos.
+    if (requiredSlots.length === 0 && !needsHeader) {
+      const { error: uErr } = await sb
+        .from("chat_campaign_recipients")
+        .update({
+          mapped_variables_json: {},
+          validation_error: null,
+          status: "pending",
+          updated_at: ts,
+        })
+        .eq("campaign_id", campaignId)
+        .eq("empresa_id", auth.empresaId)
+        .neq("status", "invalid");
+      if (uErr) {
+        return NextResponse.json(errorResponse(uErr.message), { status: 400 });
+      }
+
+      const sendConfigAfterHeader = applyHeaderImageSendConfigUpdate(
+        (campaign as { send_config_json?: unknown }).send_config_json,
+        { ok: true, url: "" }
+      );
+
+      await sb
+        .from("chat_campaigns")
+        .update({
+          status: "ready",
+          send_config_json: sendConfigAfterHeader,
+          updated_at: ts,
+        })
+        .eq("id", campaignId)
+        .eq("empresa_id", auth.empresaId);
+
+      await sb.from("chat_campaign_events").insert({
+        empresa_id: auth.empresaId,
+        campaign_id: campaignId,
+        recipient_id: null,
+        event_type: "import_validated",
+        event_payload_json: { mapping_errors: 0, header_image_ok: null, fast_path: true },
+      });
+
+      return NextResponse.json(
+        successResponse({ mapping_errors: 0, ready: true, header_image_ok: true })
+      );
+    }
 
     const { data: recipients, error: rErr } = await sb
       .from("chat_campaign_recipients")
@@ -77,9 +129,6 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
     if (rErr) {
       return NextResponse.json(errorResponse(rErr.message), { status: 400 });
     }
-
-    let mappingErrors = 0;
-    const ts = new Date().toISOString();
 
     const mappingDefinitionIncomplete =
       requiredSlots.length > 0 &&
@@ -182,7 +231,6 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
       headerResolution
     );
 
-    const needsHeader = templateSnapshotHasHeaderImage(tplComponents);
     const headerBlocked = needsHeader && !headerResolution.ok;
 
     await sb
