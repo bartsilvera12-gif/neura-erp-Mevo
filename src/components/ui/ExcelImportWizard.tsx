@@ -76,7 +76,7 @@ export default function ExcelImportWizard({
           {step === "upload" && (
             <div className="space-y-4">
               <div className="text-sm text-slate-600">
-                Subí un archivo Excel (.xlsx) o CSV. Máx. 5 MB / 5.000 filas.
+                Subí un archivo Excel (.xlsx) o CSV. Máx. 5 MB / 15.000 filas.
                 <a href={templateUrl} className="ml-2 inline-flex items-center gap-1 text-sky-700 hover:text-sky-900 underline">
                   Descargar plantilla
                 </a>

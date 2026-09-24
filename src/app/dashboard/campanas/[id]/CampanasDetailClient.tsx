@@ -754,7 +754,7 @@ export default function CampanasDetailClient({
             <div className="h-full w-full animate-pulse rounded-full bg-gradient-to-r from-[#4FAEB2]/60 via-[#4FAEB2] to-[#4FAEB2]/60" />
           </div>
         ) : null}
-        <p className="text-xs text-slate-500">Máximo 5.000 filas / 5 MB.</p>
+        <p className="text-xs text-slate-500">Máximo 15.000 filas / 5 MB.</p>
         {templateHasHeaderImage ? (
           <p className="text-xs text-slate-600">
             <strong>Imagen de cabecera (Meta):</strong> agregá una columna <code className="rounded bg-slate-100 px-1">header_image_url</code>{" "}

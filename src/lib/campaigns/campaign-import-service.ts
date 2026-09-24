@@ -2,7 +2,7 @@ import "server-only";
 import * as XLSX from "xlsx";
 import { normalizeCampaignPhone } from "@/lib/campaigns/campaign-phone";
 
-export const CAMPAIGN_IMPORT_MAX_ROWS = 5000;
+export const CAMPAIGN_IMPORT_MAX_ROWS = 15000;
 export const CAMPAIGN_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 
 export type ParsedSheet = {
