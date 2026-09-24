@@ -72,11 +72,22 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
     let mappingErrors = 0;
     const ts = new Date().toISOString();
 
-    // Fast path: plantilla sin variables y sin header image por fila → no hace
-    // falta leer `row_payload_json` de cada destinatario (con 10k+ filas eso
-    // pega 12 MB por la red y Cloudflare cortaba con 520). Marcamos todos como
-    // "pending" en un solo UPDATE y salimos.
-    if (requiredSlots.length === 0 && !needsHeader) {
+    // Fast path: plantilla sin variables y sin necesidad de leer imagen por
+    // fila → no hace falta traer `row_payload_json` de cada destinatario (con
+    // 10k+ filas eso pega 12 MB por la red y Cloudflare cortaba con 520).
+    // Marcamos todos como "pending" en un solo UPDATE y salimos.
+    // Si `needsHeader` es true pero la URL ya está fijada en
+    // `send_config_json.header_image_url` (misma imagen para todos), tampoco
+    // hace falta leer los payloads.
+    const existingSendConfig = (campaign as { send_config_json?: unknown }).send_config_json;
+    const configHeaderUrl =
+      existingSendConfig && typeof existingSendConfig === "object" && !Array.isArray(existingSendConfig)
+        ? (existingSendConfig as Record<string, unknown>).header_image_url
+        : undefined;
+    const headerHandledByConfig =
+      needsHeader && typeof configHeaderUrl === "string" && /^https:\/\//i.test(configHeaderUrl.trim());
+
+    if (requiredSlots.length === 0 && (!needsHeader || headerHandledByConfig)) {
       const { error: uErr } = await sb
         .from("chat_campaign_recipients")
         .update({
@@ -93,8 +104,10 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
       }
 
       const sendConfigAfterHeader = applyHeaderImageSendConfigUpdate(
-        (campaign as { send_config_json?: unknown }).send_config_json,
-        { ok: true, url: "" }
+        existingSendConfig,
+        headerHandledByConfig
+          ? { ok: true, url: (configHeaderUrl as string).trim() }
+          : { ok: true, url: "" }
       );
 
       await sb
@@ -120,14 +133,25 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
       );
     }
 
-    const { data: recipients, error: rErr } = await sb
-      .from("chat_campaign_recipients")
-      .select("id, row_payload_json, status")
-      .eq("campaign_id", campaignId)
-      .eq("empresa_id", auth.empresaId);
-
-    if (rErr) {
-      return NextResponse.json(errorResponse(rErr.message), { status: 400 });
+    // Slow path: hay que traer los payloads. Paginamos en chunks para no chocar
+    // con el límite default de PostgREST (1000) ni juntar 12 MB en una sola
+    // respuesta.
+    const PAGE = 1000;
+    const recipients: Array<{ id: string; row_payload_json: Record<string, string>; status: string }> = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data: pageRows, error: rErr } = await sb
+        .from("chat_campaign_recipients")
+        .select("id, row_payload_json, status")
+        .eq("campaign_id", campaignId)
+        .eq("empresa_id", auth.empresaId)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (rErr) {
+        return NextResponse.json(errorResponse(rErr.message), { status: 400 });
+      }
+      if (!pageRows || pageRows.length === 0) break;
+      recipients.push(...(pageRows as typeof recipients));
+      if (pageRows.length < PAGE) break;
     }
 
     const mappingDefinitionIncomplete =
@@ -151,12 +175,7 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
       else updateGroups.set(key, { payload, ids: [id] });
     };
 
-    for (const rec of recipients ?? []) {
-      const row = rec as {
-        id: string;
-        row_payload_json: Record<string, string>;
-        status: string;
-      };
+    for (const row of recipients) {
       if (row.status === "invalid") continue;
 
       if (mappingDefinitionIncomplete) {
@@ -224,7 +243,7 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
     const headerResolution = resolveHeaderImageUrlForCampaign({
       templateComponentsJson: tplComponents,
       sendConfigJson: (campaign as { send_config_json?: unknown }).send_config_json,
-      recipients: (recipients ?? []) as Array<{ status: string; row_payload_json: unknown }>,
+      recipients: recipients as Array<{ status: string; row_payload_json: unknown }>,
     });
     const sendConfigAfterHeader = applyHeaderImageSendConfigUpdate(
       (campaign as { send_config_json?: unknown }).send_config_json,
