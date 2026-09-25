@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import { getTenantSupabaseFromAuth, getTenantSupabaseFromAuthWithRol } from "@/lib/supabase/tenant-api";
+import { isAdmin } from "@/lib/middleware/auth";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
@@ -19,12 +20,15 @@ export async function GET(
 ) {
   try {
     const { id } = await ctxParams.params;
-    const ctx = await getTenantSupabaseFromAuth(request);
+    const ctx = await getTenantSupabaseFromAuthWithRol(request);
     if (!ctx) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
     const schema = await fetchDataSchemaForEmpresaId(ctx.auth.empresa_id);
     const row = await getProductoPg(schema, ctx.auth.empresa_id, id);
     if (!row) return NextResponse.json(errorResponse(API_ERRORS.NOT_FOUND), { status: 404 });
-    return NextResponse.json(successResponse({ producto: rowToProductoApi(row) }));
+    const producto = rowToProductoApi(row);
+    // El costo solo se expone al administrador.
+    if (!isAdmin(ctx.auth)) producto.costo_promedio = 0;
+    return NextResponse.json(successResponse({ producto }));
   } catch (err) {
     console.error("[/api/productos/[id] GET]", err instanceof Error ? err.message : err);
     return NextResponse.json(errorResponse("No se pudo cargar el producto."), { status: 500 });

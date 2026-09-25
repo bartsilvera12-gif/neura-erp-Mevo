@@ -14,12 +14,17 @@ export default async function NuevaVentaPage() {
       listProductos(true),
       listStockPorVendedor(vendedorId),
     ]);
+    // El costo es información exclusiva del administrador: no debe salir del
+    // servidor hacia el navegador del vendedor. Lo neutralizamos en el payload
+    // (no afecta comisión ni precios; ver escala.ts) y ocultamos la UI de costo.
+    const productosSinCosto = productos.map((p) => ({ ...p, costo_unitario: 0 }));
     return (
       <NuevaVentaClient
         vendedores={[role.vendedor]}
-        productos={productos}
+        productos={productosSinCosto}
         stock={stock}
         forcedVendedorId={vendedorId}
+        mostrarCosto={false}
       />
     );
   }
@@ -29,5 +34,12 @@ export default async function NuevaVentaPage() {
     listProductos(true),
     listStockPorVendedor(null),
   ]);
-  return <NuevaVentaClient vendedores={vendedores} productos={productos} stock={stock} />;
+  return (
+    <NuevaVentaClient
+      vendedores={vendedores}
+      productos={productos}
+      stock={stock}
+      mostrarCosto
+    />
+  );
 }
