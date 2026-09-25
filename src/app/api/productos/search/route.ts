@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import { getTenantSupabaseFromAuthWithRol } from "@/lib/supabase/tenant-api";
+import { isAdmin } from "@/lib/middleware/auth";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
@@ -38,12 +39,13 @@ const MAX_LIMIT = 100;
  */
 export async function GET(request: NextRequest) {
   try {
-    const ctx = await getTenantSupabaseFromAuth(request);
+    const ctx = await getTenantSupabaseFromAuthWithRol(request);
     if (!ctx) {
       return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
     }
     const { supabase, auth } = ctx;
     const empresaId = auth.empresa_id;
+    const puedeVerCosto = isAdmin(auth);
     const schema = await fetchDataSchemaForEmpresaId(empresaId);
 
     const url = new URL(request.url);
@@ -69,7 +71,8 @@ export async function GET(request: NextRequest) {
       codigo_barras: r.codigo_barras,
       codigo_barras_interno: r.codigo_barras_interno === true,
       precio_venta: Number(r.precio_venta ?? 0),
-      costo_promedio: Number(r.costo_promedio ?? 0),
+      // Costo exclusivo del administrador (no viaja al navegador de otros roles).
+      costo_promedio: puedeVerCosto ? Number(r.costo_promedio ?? 0) : 0,
       stock_actual: Number(r.stock_actual ?? 0),
       stock_minimo: Number(r.stock_minimo ?? 0),
       unidad_medida: r.unidad_medida,

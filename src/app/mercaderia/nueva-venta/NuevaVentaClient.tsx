@@ -24,11 +24,14 @@ export default function NuevaVentaClient({
   productos,
   stock,
   forcedVendedorId,
+  mostrarCosto = true,
 }: {
   vendedores: MercVendedor[];
   productos: MercProducto[];
   stock: MercStockVendedor[];
   forcedVendedorId?: string;
+  /** El costo (y la utilidad, que lo revela) solo se muestra al administrador. */
+  mostrarCosto?: boolean;
 }) {
   const router = useRouter();
   const [vendedorId, setVendedorId] = useState<string>(
@@ -201,7 +204,7 @@ export default function NuevaVentaClient({
                   <th className="px-3 py-2 text-right">Stock</th>
                   <th className="px-3 py-2 text-right">Cant.</th>
                   <th className="px-3 py-2 text-left">Escala</th>
-                  <th className="px-3 py-2 text-right">Costo</th>
+                  {mostrarCosto ? <th className="px-3 py-2 text-right">Costo</th> : null}
                   <th className="px-3 py-2 text-right">Comisión</th>
                   {tipo === "combo" ? <th className="px-3 py-2"></th> : null}
                 </tr>
@@ -247,9 +250,11 @@ export default function NuevaVentaClient({
                           <div className="mt-0.5 text-[10px] text-slate-400">(sin mayorista)</div>
                         ) : null}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-700">
-                        {fmtGs((calc?.costo_unitario_snapshot ?? 0) * l.cantidad)}
-                      </td>
+                      {mostrarCosto ? (
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-700">
+                          {fmtGs((calc?.costo_unitario_snapshot ?? 0) * l.cantidad)}
+                        </td>
+                      ) : null}
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-amber-700">
                         {fmtGs((calc?.comision_unitaria_snapshot ?? 0) * l.cantidad)}
                       </td>
@@ -349,20 +354,28 @@ export default function NuevaVentaClient({
           </span>
           <span className="text-slate-500">Precio ref.</span>
           <span className="text-right tabular-nums text-slate-800">{fmtGs(op.precio_referencia_total)}</span>
-          <span className="text-slate-500">Costo total</span>
-          <span className="text-right font-semibold tabular-nums text-slate-800">{fmtGs(op.costo_total)}</span>
+          {mostrarCosto ? (
+            <>
+              <span className="text-slate-500">Costo total</span>
+              <span className="text-right font-semibold tabular-nums text-slate-800">{fmtGs(op.costo_total)}</span>
+            </>
+          ) : null}
           <span className="text-slate-500">Comisión total</span>
           <span className="text-right font-semibold tabular-nums text-amber-700">{fmtGs(op.comision_total)}</span>
         </div>
         <div className="grid grid-cols-2 gap-y-1.5 border-t border-slate-100 bg-slate-50/50 px-4 py-3 text-sm">
           <span className="text-slate-500">Monto real</span>
           <span className="text-right font-semibold tabular-nums text-slate-900">{fmtGs(Number(monto) || 0)}</span>
-          <span className="text-slate-500">Utilidad</span>
-          <span
-            className={`text-right font-semibold tabular-nums ${util >= 0 ? "text-[#4FAEB2]" : "text-red-600"}`}
-          >
-            {fmtGs(util)}
-          </span>
+          {mostrarCosto ? (
+            <>
+              <span className="text-slate-500">Utilidad</span>
+              <span
+                className={`text-right font-semibold tabular-nums ${util >= 0 ? "text-[#4FAEB2]" : "text-red-600"}`}
+              >
+                {fmtGs(util)}
+              </span>
+            </>
+          ) : null}
         </div>
         <div className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-500">
           {tipo === "combo"

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import { getTenantSupabaseFromAuth, getTenantSupabaseFromAuthWithRol } from "@/lib/supabase/tenant-api";
+import { isAdmin } from "@/lib/middleware/auth";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
@@ -20,11 +21,12 @@ import { normalizeUpperText, normalizeUpperCodigoBarras } from "@/lib/text/norma
  */
 export async function GET(request: NextRequest) {
   try {
-    const ctx = await getTenantSupabaseFromAuth(request);
+    const ctx = await getTenantSupabaseFromAuthWithRol(request);
     if (!ctx) {
       return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
     }
     const empresaId = ctx.auth.empresa_id;
+    const puedeVerCosto = isAdmin(ctx.auth);
     const schemaRaw = await fetchDataSchemaForEmpresaId(empresaId);
     const schema = assertAllowedChatDataSchema(schemaRaw);
     const pool = getChatPostgresPool();
@@ -42,7 +44,12 @@ export async function GET(request: NextRequest) {
         ORDER BY nombre`,
       [empresaId]
     );
-    return NextResponse.json(successResponse({ productos: rows }));
+    // El costo es exclusivo del administrador: se neutraliza para el resto de roles
+    // (vendedor/supervisor/usuario) para que no viaje al navegador.
+    const productos = puedeVerCosto
+      ? rows
+      : rows.map((r) => ({ ...(r as Record<string, unknown>), costo_promedio: 0 }));
+    return NextResponse.json(successResponse({ productos }));
   } catch (err) {
     console.error("[/api/productos GET]", err instanceof Error ? err.message : err);
     return NextResponse.json(errorResponse("No se pudieron cargar los productos."), { status: 500 });

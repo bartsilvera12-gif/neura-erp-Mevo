@@ -186,16 +186,18 @@ export default function InventarioPage() {
                 className={inputFilterClass}
               />
             </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Costo promedio</label>
-              <input
-                type="text"
-                placeholder="Ej: 35000"
-                value={filtroPorCosto}
-                onChange={(e) => setFiltroPorCosto(e.target.value)}
-                className={inputFilterClass}
-              />
-            </div>
+            {isAdmin && (
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Costo promedio</label>
+                <input
+                  type="text"
+                  placeholder="Ej: 35000"
+                  value={filtroPorCosto}
+                  onChange={(e) => setFiltroPorCosto(e.target.value)}
+                  className={inputFilterClass}
+                />
+              </div>
+            )}
             <div>
               <label className="block text-xs text-gray-400 mb-1">Precio venta</label>
               <input
@@ -270,16 +272,18 @@ export default function InventarioPage() {
               <tr className="bg-slate-50 text-slate-600 text-sm font-semibold">
                 <th className="py-3 pr-4 font-medium">Nombre</th>
                 <th className="py-3 pr-4 font-medium">SKU</th>
-                <th className="py-3 pr-4 font-medium">Costo Prom.</th>
+                {isAdmin && <th className="py-3 pr-4 font-medium">Costo Prom.</th>}
                 <th className="py-3 pr-4 font-medium">Precio Venta</th>
                 <th className="py-3 pr-4 font-medium text-center">Stock</th>
                 <th className="py-3 pr-4 font-medium text-center">Stock Mín.</th>
                 <th className="py-3 pr-4 font-medium">Unidad</th>
                 <th className="py-3 pr-4 font-medium">Ubicación</th>
                 <th className="py-3 pr-4 font-medium">Valuación</th>
-                <th className="py-3 font-medium text-right">
-                  <span title="(precio - costo) / precio × 100">Margen s/venta</span>
-                </th>
+                {isAdmin && (
+                  <th className="py-3 font-medium text-right">
+                    <span title="(precio - costo) / precio × 100">Margen s/venta</span>
+                  </th>
+                )}
                 <th className="py-3 font-medium w-20"></th>
               </tr>
             </thead>
@@ -292,7 +296,7 @@ export default function InventarioPage() {
                   <tr key={p.id} className="border-b border-slate-200 last:border-0 hover:bg-slate-50 transition-colors">
                     <td className="py-4 pr-4 font-medium text-gray-800">{p.nombre}</td>
                     <td className="py-4 pr-4 text-gray-500 font-mono">{p.sku}</td>
-                    <td className="py-4 pr-4 text-gray-700">{formatGs(p.costo_promedio)}</td>
+                    {isAdmin && <td className="py-4 pr-4 text-gray-700">{formatGs(p.costo_promedio)}</td>}
                     <td className="py-4 pr-4 text-gray-700">{formatGs(p.precio_venta)}</td>
                     <td className="py-4 pr-4 text-center">
                       <span className={`font-semibold ${stockBajo ? "text-red-600" : "text-gray-800"}`}>
@@ -321,9 +325,11 @@ export default function InventarioPage() {
                         {p.metodo_valuacion}
                       </span>
                     </td>
-                    <td className={`py-4 text-right tabular-nums font-semibold ${margenColor(margen)}`}>
-                      {margen.toFixed(2)}%
-                    </td>
+                    {isAdmin && (
+                      <td className={`py-4 text-right tabular-nums font-semibold ${margenColor(margen)}`}>
+                        {margen.toFixed(2)}%
+                      </td>
+                    )}
                     <td className="py-4">
                       <Link
                         href={`/inventario/${p.id}/editar`}

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import { getTenantSupabaseFromAuthWithRol } from "@/lib/supabase/tenant-api";
+import { isAdmin } from "@/lib/middleware/auth";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
 import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
@@ -29,9 +30,10 @@ interface Row {
 }
 
 export async function GET(request: NextRequest) {
-  const ctx = await getTenantSupabaseFromAuth(request);
+  const ctx = await getTenantSupabaseFromAuthWithRol(request);
   if (!ctx) return new Response("Unauthorized", { status: 401 });
   const empresaId = ctx.auth.empresa_id;
+  const puedeVerCosto = isAdmin(ctx.auth);
   const schema = assertAllowedChatDataSchema(await fetchDataSchemaForEmpresaId(empresaId));
   const pool = getChatPostgresPool();
   if (!pool) return new Response("Pool no disponible", { status: 500 });
@@ -67,7 +69,10 @@ export async function GET(request: NextRequest) {
       { header: "PROVEEDOR_PRINCIPAL", value: (r) => r.proveedor_nombre ?? "", width: 28 },
       { header: "UBICACION_PRINCIPAL", value: (r) => r.ubicacion_nombre ? `${r.ubicacion_nombre}${r.ubicacion_tipo ? ` (${r.ubicacion_tipo})` : ""}` : "", width: 28 },
       { header: "UNIDAD_MEDIDA", value: (r) => r.unidad_medida, width: 12 },
-      { header: "COSTO_PROMEDIO", value: (r) => Number(r.costo_promedio), width: 14 },
+      // Columna COSTO_PROMEDIO solo para administradores.
+      ...(puedeVerCosto
+        ? [{ header: "COSTO_PROMEDIO", value: (r: Row) => Number(r.costo_promedio), width: 14 }]
+        : []),
       { header: "PRECIO_VENTA", value: (r) => Number(r.precio_venta), width: 14 },
       { header: "STOCK_ACTUAL", value: (r) => Number(r.stock_actual), width: 12 },
       { header: "STOCK_MINIMO", value: (r) => Number(r.stock_minimo), width: 12 },
