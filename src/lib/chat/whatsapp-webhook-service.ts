@@ -3,6 +3,7 @@ import {
   type WebhookProvisionEnv,
 } from "@/lib/chat/channel-provision";
 import { createFlowEngine } from "@/lib/chat/flow-engine-service";
+import { isTransientWebhookError } from "@/lib/chat/webhooks/webhook-transient-error";
 import { flowTrace } from "@/lib/chat/flow-trace-log";
 import { persistInboundChatMessageAndBump } from "@/lib/chat/incoming-message-service";
 import { isSingleClientMode } from "@/lib/instance/single-client";
@@ -428,6 +429,7 @@ export async function processInboundWebhookValue(
   const errors: string[] = [];
   let processed = 0;
   let skipped = 0;
+  let inboundDurableWrite = false;
 
   const phoneNumberId = value.metadata?.phone_number_id?.trim();
   if (!phoneNumberId) {
@@ -691,6 +693,7 @@ export async function processInboundWebhookValue(
 
     const messageAlreadyExists = await messageExists(supabase, waMid);
     let inboundMessageAlreadyPersisted = messageAlreadyExists;
+    if (messageAlreadyExists) inboundDurableWrite = true;
 
     /**
      * Antes se hacía `continue` en cualquier mensaje ya persistido (no media): Meta reintenta webhooks
@@ -847,6 +850,7 @@ export async function processInboundWebhookValue(
         });
         if (early.ok || early.duplicate) {
           inboundMessageAlreadyPersisted = true;
+          inboundDurableWrite = true;
           // CLAIM GATE: si perdí el claim (otra invocación ya insertó este wa_message_id primero),
           // esto es un reintento/duplicado de Meta → NO ejecutar el motor (evita bienvenida/combos
           // duplicados). Se preservan las excepciones existentes: botones/lista (reprocesan routing
@@ -873,8 +877,18 @@ export async function processInboundWebhookValue(
             wa_mid: waMid,
             error: early.error,
           });
+          // Base/PostgREST caído un momento: cortar ACÁ, antes de cualquier efecto del flujo, para
+          // que el handler responda 503 y Meta reintente (antes el mensaje se perdía sin rastro).
+          if (isTransientWebhookError(early.error)) {
+            errors.push(`Insert mensaje (early): ${early.error}`);
+            continue;
+          }
         }
       }
+
+      // Desde acá pueden correr efectos no idempotentes (restart-intent, CRM, envíos del flujo):
+      // aunque algo falle después, no se pide reintento a Meta.
+      inboundDurableWrite = true;
 
       await ensureCentralChatConversationMirror({
         pool: pool ?? null,
@@ -1195,6 +1209,9 @@ export async function processInboundWebhookValue(
         wa_mid: waMid,
         inboundMessageAlreadyPersisted,
       });
+
+      // A esta altura pudo haber efectos previos a la persistencia (CRM, sync de flujo): no reintentar.
+      inboundDurableWrite = true;
 
       let inboundRowId: string | null = null;
 
@@ -1913,6 +1930,7 @@ export async function processInboundWebhookValue(
     processed,
     skipped,
     errors,
+    inboundDurableWrite,
   };
 }
 
@@ -2318,6 +2336,7 @@ export async function processWhatsAppWebhookBody(
     aggregated.skipped += r.skipped;
     aggregated.errors.push(...r.errors);
     if (!r.ok) aggregated.ok = false;
+    if (r.inboundDurableWrite) aggregated.inboundDurableWrite = true;
   }
 
   return aggregated;
