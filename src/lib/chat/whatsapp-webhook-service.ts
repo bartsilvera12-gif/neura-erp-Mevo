@@ -272,16 +272,21 @@ function extractMetaButtonId(msg: MetaInboundMessage): string | null {
   return null;
 }
 
+/**
+ * ¿Ya está guardado este wa_message_id? `error` != null si la LECTURA falló: antes se tomaba
+ * como "no existe" y un corte de Supabase podía reprocesar un mensaje ya guardado.
+ */
 async function messageExists(
   supabase: SupabaseAdmin,
   waMessageId: string
-): Promise<boolean> {
-  const { data } = await supabase
+): Promise<{ exists: boolean; error: string | null }> {
+  const { data, error } = await supabase
     .from("chat_messages")
     .select("id")
     .eq("wa_message_id", waMessageId)
     .maybeSingle();
-  return !!data?.id;
+  if (error) return { exists: false, error: error.message ?? "error" };
+  return { exists: !!data?.id, error: null };
 }
 
 type WhatsappChannelRow = {
@@ -691,7 +696,14 @@ export async function processInboundWebhookValue(
       continue;
     }
 
-    const messageAlreadyExists = await messageExists(supabase, waMid);
+    const existsCheck = await messageExists(supabase, waMid);
+    if (existsCheck.error && isTransientWebhookError(existsCheck.error)) {
+      // Supabase caído un momento: no sabemos si ya está guardado → cortar antes de escribir
+      // nada; el handler responde 503 y Meta reintenta. Otros errores siguen como antes.
+      errors.push(`Mensaje entrante (lectura): ${existsCheck.error}`);
+      continue;
+    }
+    const messageAlreadyExists = existsCheck.exists;
     let inboundMessageAlreadyPersisted = messageAlreadyExists;
     if (messageAlreadyExists) inboundDurableWrite = true;
 
