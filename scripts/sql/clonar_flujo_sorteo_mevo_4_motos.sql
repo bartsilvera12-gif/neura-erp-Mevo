@@ -12,19 +12,23 @@
 -- Uso: pegar tal cual en el SQL Editor de Supabase (service_role) y ejecutar.
 -- Idempotente: se puede correr varias veces; siempre deja el flujo destino
 -- igual al origen + los overrides del final.
+--
+-- Nota de compatibilidad: el editor de Supabase no tolera dollar-quoting
+-- anidado ni format() posicional, así que este script usa un unico bloque DO
+-- y arma las sentencias con %I / %L / %s.
 -- =============================================================================
 
 DO $do$
 DECLARE
   -- ---------------------------------------------------------------- parámetros
-  v_empresa_like       text := '%mevo%';                      -- empresa (zentra_erp.empresas.nombre)
-  v_src_like           text := '%auris%';                     -- flujo ORIGEN  (Toyota auris + 3 motos)
-  v_dst_like           text := '%4 motos%';                   -- flujo DESTINO (sorteo 4 motos)
-  v_sorteo_like        text := '%4 motos%';                   -- sorteo (sorteos.nombre)
+  v_empresa_like  text := '%mevo%';     -- empresa (zentra_erp.empresas.nombre)
+  v_src_like      text := '%auris%';    -- flujo ORIGEN  (Toyota auris + 3 motos)
+  v_dst_like      text := '%4 motos%';  -- flujo DESTINO (sorteo 4 motos)
+  v_sorteo_like   text := '%4 motos%';  -- sorteo (sorteos.nombre)
 
-  v_imagen_url         text := 'https://res.cloudinary.com/drupicep5/image/upload/v1790805557/imagen_2026-09-30_185909149_evhxk0.png';
+  v_imagen_url    text := 'https://res.cloudinary.com/drupicep5/image/upload/v1790805557/imagen_2026-09-30_185909149_evhxk0.png';
 
-  v_bienvenida         text := $msg$👋 ¡Holaaa! Bienvenido a MEVO SORTEOS 🎟️
+  v_bienvenida    text := '👋 ¡Holaaa! Bienvenido a MEVO SORTEOS 🎟️
 
 🏍️ ¡PARTICIPÁ POR 4 MOTOS!
 
@@ -42,9 +46,9 @@ DECLARE
 24 de octubre — Storm
 31 de octubre — Canyon
 
-🤩 ¡Con 1 boleta ya participás por las 4 motos!$msg$;
+🤩 ¡Con 1 boleta ya participás por las 4 motos!';
 
-  v_cta                text := '🎟️ Elegí tu paquete de boletas 👇';
+  v_cta           text := '🎟️ Elegí tu paquete de boletas 👇';
 
   -- ---------------------------------------------------------------- internos
   v_empresa_id    uuid;
@@ -74,6 +78,7 @@ BEGIN
     INTO v_empresa_id, v_empresa_nom, v_schema
   FROM zentra_erp.empresas e
   WHERE e.nombre ILIKE v_empresa_like;
+
   IF to_regclass(format('%I.chat_flows', v_schema)) IS NULL THEN
     RAISE EXCEPTION 'El schema % no tiene chat_flows', v_schema;
   END IF;
@@ -82,18 +87,18 @@ BEGIN
   -- 2) Flujo origen y flujo destino ----------------------------------------
   EXECUTE format(
     'SELECT count(*), min(flow_code) FROM %I.chat_flows
-      WHERE empresa_id = $1 AND (label ILIKE $2 OR flow_code ILIKE $2)',
-    v_schema
-  ) INTO v_n, v_src_flow USING v_empresa_id, v_src_like;
+      WHERE empresa_id = %L AND (label ILIKE %L OR flow_code ILIKE %L)',
+    v_schema, v_empresa_id, v_src_like, v_src_like
+  ) INTO v_n, v_src_flow;
   IF v_n <> 1 THEN
     RAISE EXCEPTION 'Flujo ORIGEN: se esperaba 1 coincidencia para %, se encontraron %', v_src_like, v_n;
   END IF;
 
   EXECUTE format(
     'SELECT count(*), min(flow_code) FROM %I.chat_flows
-      WHERE empresa_id = $1 AND (label ILIKE $2 OR flow_code ILIKE $2)',
-    v_schema
-  ) INTO v_n, v_dst_flow USING v_empresa_id, v_dst_like;
+      WHERE empresa_id = %L AND (label ILIKE %L OR flow_code ILIKE %L)',
+    v_schema, v_empresa_id, v_dst_like, v_dst_like
+  ) INTO v_n, v_dst_flow;
   IF v_n <> 1 THEN
     RAISE EXCEPTION 'Flujo DESTINO: se esperaba 1 coincidencia para %, se encontraron %', v_dst_like, v_n;
   END IF;
@@ -108,10 +113,12 @@ BEGIN
     WHEN to_regclass(format('%I.sorteos', v_schema)) IS NOT NULL THEN v_schema
     ELSE 'zentra_erp'
   END;
+
   EXECUTE format(
-    'SELECT count(*), min(id::text)::uuid FROM %I.sorteos WHERE empresa_id = $1 AND nombre ILIKE $2',
-    v_sorteo_schema
-  ) INTO v_n, v_sorteo_id USING v_empresa_id, v_sorteo_like;
+    'SELECT count(*), min(id::text)::uuid FROM %I.sorteos
+      WHERE empresa_id = %L AND nombre ILIKE %L',
+    v_sorteo_schema, v_empresa_id, v_sorteo_like
+  ) INTO v_n, v_sorteo_id;
   IF v_n <> 1 THEN
     RAISE EXCEPTION 'Sorteo: se esperaba 1 coincidencia para %, se encontraron %', v_sorteo_like, v_n;
   END IF;
@@ -119,9 +126,9 @@ BEGIN
 
   -- 4) Limpiar el flujo destino (opciones y bloques caen por FK) ------------
   EXECUTE format(
-    'DELETE FROM %I.chat_flow_nodes WHERE empresa_id = $1 AND flow_code = $2',
-    v_schema
-  ) USING v_empresa_id, v_dst_flow;
+    'DELETE FROM %I.chat_flow_nodes WHERE empresa_id = %L AND flow_code = %L',
+    v_schema, v_empresa_id, v_dst_flow
+  );
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RAISE NOTICE 'Nodos previos eliminados en destino: %', v_n;
 
@@ -134,11 +141,11 @@ BEGIN
     AND is_generated = 'NEVER';
 
   EXECUTE format(
-    'INSERT INTO %1$I.chat_flow_nodes (flow_code, %2$s)
-     SELECT $1, %2$s FROM %1$I.chat_flow_nodes
-      WHERE empresa_id = $2 AND flow_code = $3',
-    v_schema, v_cols
-  ) USING v_dst_flow, v_empresa_id, v_src_flow;
+    'INSERT INTO %I.chat_flow_nodes (flow_code, %s)
+     SELECT %L, %s FROM %I.chat_flow_nodes
+      WHERE empresa_id = %L AND flow_code = %L',
+    v_schema, v_cols, v_dst_flow, v_cols, v_schema, v_empresa_id, v_src_flow
+  );
   GET DIAGNOSTICS v_n = ROW_COUNT;
   IF v_n = 0 THEN
     RAISE EXCEPTION 'El flujo origen % no tiene nodos', v_src_flow;
@@ -155,15 +162,15 @@ BEGIN
     AND is_generated = 'NEVER';
 
   EXECUTE format(
-    'INSERT INTO %1$I.chat_flow_options (node_id, %2$s)
-     SELECT dn.id, %3$s
-       FROM %1$I.chat_flow_options o
-       JOIN %1$I.chat_flow_nodes sn
-         ON sn.id = o.node_id AND sn.empresa_id = $1 AND sn.flow_code = $2
-       JOIN %1$I.chat_flow_nodes dn
-         ON dn.empresa_id = sn.empresa_id AND dn.flow_code = $3 AND dn.node_code = sn.node_code',
-    v_schema, v_cols, v_cols_pref
-  ) USING v_empresa_id, v_src_flow, v_dst_flow;
+    'INSERT INTO %I.chat_flow_options (node_id, %s)
+     SELECT dn.id, %s
+       FROM %I.chat_flow_options o
+       JOIN %I.chat_flow_nodes sn
+         ON sn.id = o.node_id AND sn.empresa_id = %L AND sn.flow_code = %L
+       JOIN %I.chat_flow_nodes dn
+         ON dn.empresa_id = sn.empresa_id AND dn.flow_code = %L AND dn.node_code = sn.node_code',
+    v_schema, v_cols, v_cols_pref, v_schema, v_schema, v_empresa_id, v_src_flow, v_schema, v_dst_flow
+  );
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RAISE NOTICE 'Opciones clonadas: %', v_n;
 
@@ -178,15 +185,15 @@ BEGIN
       AND is_generated = 'NEVER';
 
     EXECUTE format(
-      'INSERT INTO %1$I.chat_flow_node_blocks (node_id, %2$s)
-       SELECT dn.id, %3$s
-         FROM %1$I.chat_flow_node_blocks b
-         JOIN %1$I.chat_flow_nodes sn
-           ON sn.id = b.node_id AND sn.empresa_id = $1 AND sn.flow_code = $2
-         JOIN %1$I.chat_flow_nodes dn
-           ON dn.empresa_id = sn.empresa_id AND dn.flow_code = $3 AND dn.node_code = sn.node_code',
-      v_schema, v_cols, v_cols_pref
-    ) USING v_empresa_id, v_src_flow, v_dst_flow;
+      'INSERT INTO %I.chat_flow_node_blocks (node_id, %s)
+       SELECT dn.id, %s
+         FROM %I.chat_flow_node_blocks b
+         JOIN %I.chat_flow_nodes sn
+           ON sn.id = b.node_id AND sn.empresa_id = %L AND sn.flow_code = %L
+         JOIN %I.chat_flow_nodes dn
+           ON dn.empresa_id = sn.empresa_id AND dn.flow_code = %L AND dn.node_code = sn.node_code',
+      v_schema, v_cols, v_cols_pref, v_schema, v_schema, v_empresa_id, v_src_flow, v_schema, v_dst_flow
+    );
     GET DIAGNOSTICS v_n = ROW_COUNT;
     RAISE NOTICE 'Bloques clonados: %', v_n;
   END IF;
@@ -194,38 +201,38 @@ BEGIN
   -- 8) Nodo de bienvenida del destino y nodo siguiente tras elegir cantidad -
   EXECUTE format(
     'SELECT node_code FROM %I.chat_flow_nodes
-      WHERE empresa_id = $1 AND flow_code = $2 AND is_active
+      WHERE empresa_id = %L AND flow_code = %L AND is_active
       ORDER BY (node_code ~* ''bienvenid|inicio|welcome|start'') DESC, sort_order ASC
       LIMIT 1',
-    v_schema
-  ) INTO v_welcome USING v_empresa_id, v_dst_flow;
+    v_schema, v_empresa_id, v_dst_flow
+  ) INTO v_welcome;
   IF v_welcome IS NULL THEN
     RAISE EXCEPTION 'No se pudo identificar el nodo de bienvenida en %', v_dst_flow;
   END IF;
 
   EXECUTE format(
     'SELECT o.next_node_code
-       FROM %1$I.chat_flow_options o
-       JOIN %1$I.chat_flow_nodes n ON n.id = o.node_id
-      WHERE n.empresa_id = $1 AND n.flow_code = $2
+       FROM %I.chat_flow_options o
+       JOIN %I.chat_flow_nodes n ON n.id = o.node_id
+      WHERE n.empresa_id = %L AND n.flow_code = %L
         AND o.next_node_code IS NOT NULL
         AND o.option_payload ?| array[''cantidad'',''cantidad_boletos'',''cantidad_boletas'',''cantidad_numeros'',''boletas'',''boletos'']
       ORDER BY n.sort_order, o.sort_order
       LIMIT 1',
-    v_schema
-  ) INTO v_next_node USING v_empresa_id, v_dst_flow;
+    v_schema, v_schema, v_empresa_id, v_dst_flow
+  ) INTO v_next_node;
 
   IF v_next_node IS NULL THEN
     -- Fallback: el destino del primer botón del propio nodo de bienvenida clonado.
     EXECUTE format(
       'SELECT o.next_node_code
-         FROM %1$I.chat_flow_options o
-         JOIN %1$I.chat_flow_nodes n ON n.id = o.node_id
-        WHERE n.empresa_id = $1 AND n.flow_code = $2 AND n.node_code = $3
+         FROM %I.chat_flow_options o
+         JOIN %I.chat_flow_nodes n ON n.id = o.node_id
+        WHERE n.empresa_id = %L AND n.flow_code = %L AND n.node_code = %L
           AND o.next_node_code IS NOT NULL
         ORDER BY o.sort_order LIMIT 1',
-      v_schema
-    ) INTO v_next_node USING v_empresa_id, v_dst_flow, v_welcome;
+      v_schema, v_schema, v_empresa_id, v_dst_flow, v_welcome
+    ) INTO v_next_node;
   END IF;
   IF v_next_node IS NULL THEN
     RAISE EXCEPTION 'No se pudo determinar el nodo siguiente a la elección de boletas en %', v_dst_flow;
@@ -235,43 +242,43 @@ BEGIN
   -- 9) Override del nodo de bienvenida: mensaje + imagen + 5 opciones -------
   EXECUTE format(
     'UPDATE %I.chat_flow_nodes
-        SET message_text = $1, node_type = ''buttons'', is_active = true
-      WHERE empresa_id = $2 AND flow_code = $3 AND node_code = $4',
-    v_schema
-  ) USING v_bienvenida, v_empresa_id, v_dst_flow, v_welcome;
+        SET message_text = %L, node_type = ''buttons'', is_active = true
+      WHERE empresa_id = %L AND flow_code = %L AND node_code = %L',
+    v_schema, v_bienvenida, v_empresa_id, v_dst_flow, v_welcome
+  );
 
   EXECUTE format(
-    'DELETE FROM %1$I.chat_flow_options o
-      USING %1$I.chat_flow_nodes n
-      WHERE o.node_id = n.id AND n.empresa_id = $1 AND n.flow_code = $2 AND n.node_code = $3',
-    v_schema
-  ) USING v_empresa_id, v_dst_flow, v_welcome;
+    'DELETE FROM %I.chat_flow_options o
+      USING %I.chat_flow_nodes n
+      WHERE o.node_id = n.id AND n.empresa_id = %L AND n.flow_code = %L AND n.node_code = %L',
+    v_schema, v_schema, v_empresa_id, v_dst_flow, v_welcome
+  );
 
   IF to_regclass(format('%I.chat_flow_node_blocks', v_schema)) IS NOT NULL THEN
     EXECUTE format(
-      'DELETE FROM %1$I.chat_flow_node_blocks b
-        USING %1$I.chat_flow_nodes n
-        WHERE b.node_id = n.id AND n.empresa_id = $1 AND n.flow_code = $2 AND n.node_code = $3',
-      v_schema
-    ) USING v_empresa_id, v_dst_flow, v_welcome;
+      'DELETE FROM %I.chat_flow_node_blocks b
+        USING %I.chat_flow_nodes n
+        WHERE b.node_id = n.id AND n.empresa_id = %L AND n.flow_code = %L AND n.node_code = %L',
+      v_schema, v_schema, v_empresa_id, v_dst_flow, v_welcome
+    );
 
     EXECUTE format(
-      'INSERT INTO %1$I.chat_flow_node_blocks (empresa_id, node_id, block_type, content_text, media_url, sort_order)
+      'INSERT INTO %I.chat_flow_node_blocks (empresa_id, node_id, block_type, content_text, media_url, sort_order)
        SELECT n.empresa_id, n.id, v.block_type, v.content_text, v.media_url, v.sort_order
-         FROM %1$I.chat_flow_nodes n
+         FROM %I.chat_flow_nodes n
          CROSS JOIN (VALUES
-           (''image'',   $4::text, $5::text, 10),
-           (''buttons'', $6::text, NULL::text, 20)
+           (''image'',   %L::text, %L::text, 10),
+           (''buttons'', %L::text, NULL::text, 20)
          ) AS v(block_type, content_text, media_url, sort_order)
-        WHERE n.empresa_id = $1 AND n.flow_code = $2 AND n.node_code = $3',
-      v_schema
-    ) USING v_empresa_id, v_dst_flow, v_welcome, v_bienvenida, v_imagen_url, v_cta;
+        WHERE n.empresa_id = %L AND n.flow_code = %L AND n.node_code = %L',
+      v_schema, v_schema, v_bienvenida, v_imagen_url, v_cta, v_empresa_id, v_dst_flow, v_welcome
+    );
   END IF;
 
   EXECUTE format(
-    'INSERT INTO %1$I.chat_flow_options
+    'INSERT INTO %I.chat_flow_options
        (node_id, label, option_value, meta_button_id, next_node_code, sort_order, option_payload)
-     SELECT n.id, v.label, v.option_value, v.meta_button_id, $4, v.sort_order,
+     SELECT n.id, v.label, v.option_value, v.meta_button_id, %L, v.sort_order,
             jsonb_build_object(
               ''cantidad'', v.cantidad,
               ''cantidad_boletos'', v.cantidad,
@@ -280,7 +287,7 @@ BEGIN
               ''precio_fuente'', ''promo'',
               ''promo_nombre'', v.label
             )
-       FROM %1$I.chat_flow_nodes n
+       FROM %I.chat_flow_nodes n
        CROSS JOIN (VALUES
          (''5.000 Gs → 1 boleta'',     ''1_boleta'',   ''promo_5k_1'',     10, 1,  5000),
          (''10.000 Gs → 3 boletas'',   ''3_boletas'',  ''promo_10k_3'',    20, 3,  10000),
@@ -288,9 +295,9 @@ BEGIN
          (''50.000 Gs → 18 boletas'',  ''18_boletas'', ''promo_50k_18'',   40, 18, 50000),
          (''100.000 Gs → 40 boletas'', ''40_boletas'', ''promo_100k_40'',  50, 40, 100000)
        ) AS v(label, option_value, meta_button_id, sort_order, cantidad, monto)
-      WHERE n.empresa_id = $1 AND n.flow_code = $2 AND n.node_code = $3',
-    v_schema
-  ) USING v_empresa_id, v_dst_flow, v_welcome, v_next_node;
+      WHERE n.empresa_id = %L AND n.flow_code = %L AND n.node_code = %L',
+    v_schema, v_next_node, v_schema, v_empresa_id, v_dst_flow, v_welcome
+  );
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RAISE NOTICE 'Opciones de boletas cargadas en %: %', v_welcome, v_n;
 
@@ -300,9 +307,10 @@ BEGIN
     WHERE table_schema = v_schema AND table_name = 'chat_flows' AND column_name = 'flow_config'
   ) THEN
     EXECUTE format(
-      'SELECT coalesce(flow_config, ''{}''::jsonb) FROM %I.chat_flows WHERE empresa_id = $1 AND flow_code = $2',
-      v_schema
-    ) INTO v_cfg USING v_empresa_id, v_src_flow;
+      'SELECT coalesce(flow_config, ''{}''::jsonb) FROM %I.chat_flows
+        WHERE empresa_id = %L AND flow_code = %L',
+      v_schema, v_empresa_id, v_src_flow
+    ) INTO v_cfg;
 
     v_cfg := coalesce(v_cfg, '{}'::jsonb)
              || jsonb_build_object('restart_node_code', v_welcome)
@@ -314,25 +322,25 @@ BEGIN
 
     EXECUTE format(
       'UPDATE %I.chat_flows
-          SET flow_config = $1, sorteo_id = $2, channel = ''whatsapp'', activo = true, updated_at = now()
-        WHERE empresa_id = $3 AND flow_code = $4',
-      v_schema
-    ) USING v_cfg, v_sorteo_id, v_empresa_id, v_dst_flow;
+          SET flow_config = %L, sorteo_id = %L, channel = ''whatsapp'', activo = true, updated_at = now()
+        WHERE empresa_id = %L AND flow_code = %L',
+      v_schema, v_cfg, v_sorteo_id, v_empresa_id, v_dst_flow
+    );
   ELSE
     EXECUTE format(
       'UPDATE %I.chat_flows
-          SET sorteo_id = $1, channel = ''whatsapp'', activo = true, updated_at = now()
-        WHERE empresa_id = $2 AND flow_code = $3',
-      v_schema
-    ) USING v_sorteo_id, v_empresa_id, v_dst_flow;
+          SET sorteo_id = %L, channel = ''whatsapp'', activo = true, updated_at = now()
+        WHERE empresa_id = %L AND flow_code = %L',
+      v_schema, v_sorteo_id, v_empresa_id, v_dst_flow
+    );
   END IF;
 
   -- 11) Reglas de recontacto (si el tenant las tiene) -----------------------
   IF to_regclass(format('%I.chat_flow_recontact_rules', v_schema)) IS NOT NULL THEN
     EXECUTE format(
-      'DELETE FROM %I.chat_flow_recontact_rules WHERE empresa_id = $1 AND flow_code = $2',
-      v_schema
-    ) USING v_empresa_id, v_dst_flow;
+      'DELETE FROM %I.chat_flow_recontact_rules WHERE empresa_id = %L AND flow_code = %L',
+      v_schema, v_empresa_id, v_dst_flow
+    );
 
     SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position)
       INTO v_cols
@@ -342,11 +350,11 @@ BEGIN
       AND is_generated = 'NEVER';
 
     EXECUTE format(
-      'INSERT INTO %1$I.chat_flow_recontact_rules (flow_code, %2$s)
-       SELECT $1, %2$s FROM %1$I.chat_flow_recontact_rules
-        WHERE empresa_id = $2 AND flow_code = $3',
-      v_schema, v_cols
-    ) USING v_dst_flow, v_empresa_id, v_src_flow;
+      'INSERT INTO %I.chat_flow_recontact_rules (flow_code, %s)
+       SELECT %L, %s FROM %I.chat_flow_recontact_rules
+        WHERE empresa_id = %L AND flow_code = %L',
+      v_schema, v_cols, v_dst_flow, v_cols, v_schema, v_empresa_id, v_src_flow
+    );
     GET DIAGNOSTICS v_n = ROW_COUNT;
     RAISE NOTICE 'Reglas de recontacto clonadas: %', v_n;
   END IF;
@@ -356,8 +364,10 @@ END
 $do$;
 
 -- =============================================================================
--- Verificación (ajustar el schema al data_schema de Mevo si el editor no lo resuelve)
+-- Verificación (reemplazar <data_schema> por el de Mevo y <flow_code_destino>)
 -- =============================================================================
+-- SELECT id, nombre, data_schema FROM zentra_erp.empresas WHERE nombre ILIKE '%mevo%';
+--
 -- SELECT f.flow_code, f.label, f.activo, f.sorteo_id, f.flow_config
 --   FROM <data_schema>.chat_flows f
 --  WHERE f.label ILIKE '%4 motos%';
