@@ -205,7 +205,19 @@ export async function syncWhatsappConversationFlowFromCatalog(
     return { flow_code: targetFlow, flow_current_node: currentNode, changed: false };
   }
 
-  const firstNode = (await getFirstActiveNodeCodeForFlow(supabase, empresaId, targetFlow)) ?? "inicio";
+  const firstNode = await getFirstActiveNodeCodeForFlow(supabase, empresaId, targetFlow);
+  if (!firstNode) {
+    // Antes había un fallback `?? "inicio"` que dejaba la conversación con un
+    // puntero a un nodo inexistente y trababa toda futura interacción con
+    // "Nodo actual no encontrado". Preferimos no tocar el estado si no
+    // podemos resolver un primer nodo real del catálogo.
+    console.error(LOG, "first_node_unresolvable_skip_reassign", {
+      empresaId,
+      conversationId,
+      targetFlow,
+    });
+    return { flow_code: currentFlow, flow_current_node: currentNode, changed: false };
+  }
 
   if (currentFlow) {
     console.warn(LOG, "previous_flow_inactive", {
@@ -417,8 +429,21 @@ export async function restartWhatsappConversationToFlowStart(
     });
   }
 
-  const canonicalFirst =
-    (await getFirstActiveNodeCodeForFlow(supabase, empresaId, targetFlow)) ?? "inicio";
+  const canonicalFirst = await getFirstActiveNodeCodeForFlow(supabase, empresaId, targetFlow);
+  if (!canonicalFirst) {
+    console.error(FLOW_RESTART, "restart_failed", {
+      reason: "first_node_unresolvable",
+      conversationId,
+      targetFlow,
+    });
+    console.warn(CONV_LOG, "conversation_restarted", {
+      conversationId,
+      ok: false,
+      detail: "first_node_unresolvable",
+      trigger: opts.trigger,
+    });
+    return { flow_code: null, flow_current_node: null, restarted: false, reason: "first_node_unresolvable" };
+  }
   const requested = opts.targetNodeCode?.trim() || null;
   let firstNode = canonicalFirst;
   if (requested) {
