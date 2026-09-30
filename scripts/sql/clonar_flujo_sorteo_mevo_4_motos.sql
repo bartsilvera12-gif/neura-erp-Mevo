@@ -99,12 +99,13 @@ SELECT
       LIMIT 1)
   ),
   (SELECT r.id FROM sorteos r
-    WHERE r.empresa_id = d.empresa_id AND r.nombre ILIKE '%4 motos%'
+    WHERE r.empresa_id = d.empresa_id AND r.nombre ILIKE '%4_motos%'
     ORDER BY r.created_at
     LIMIT 1)
 FROM chat_flows d
 JOIN chat_flows s
-  ON s.empresa_id = d.empresa_id AND s.label ILIKE '%auris%'
+  ON s.empresa_id = d.empresa_id
+ AND (s.label ILIKE '%auris%' OR s.flow_code ILIKE '%auris%')
 CROSS JOIN LATERAL (
   SELECT n.id, n.node_code
     FROM chat_flow_nodes n
@@ -112,7 +113,7 @@ CROSS JOIN LATERAL (
    ORDER BY (n.node_code ~* 'bienvenid|inicio|welcome|start') DESC, n.sort_order
    LIMIT 1
 ) w
-WHERE d.label ILIKE '%4 motos%';
+WHERE (d.label ILIKE '%4 motos%' OR d.flow_code ILIKE '%4_motos%');
 
 -- Freno: si el contexto quedó vacío, esto corta con "division by zero".
 SELECT 1 / (SELECT count(*) FROM _mevo_ctx)::int AS contexto_ok;
