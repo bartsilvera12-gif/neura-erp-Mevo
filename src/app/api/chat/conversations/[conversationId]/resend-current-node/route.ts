@@ -3,6 +3,7 @@ import { getAuthWithRol } from "@/lib/middleware/auth";
 import { getChatServiceClientForEmpresa } from "@/app/api/chat/_chat-service-client";
 import { createFlowEngine } from "@/lib/chat/flow-engine-service";
 import { isSorteoFinalTicketNode } from "@/lib/chat/sorteo-final-ticket-node";
+import { isNodeActiveInFlow } from "@/lib/chat/resolve-whatsapp-active-flow";
 
 const EVENT_OK = "manual_current_node_resent" as const;
 const EVENT_FAIL = "manual_current_node_resend_failed" as const;
@@ -104,6 +105,24 @@ export async function POST(
       const st = String((sessRow as { status?: string } | null)?.status ?? "").trim().toLowerCase();
       sessionCompleted = st === "completed";
     }
+    // Si el nodo actual guardado en la conversación no existe en el catálogo
+    // del flujo, no tiene sentido reenviar: el motor iba a fallar con
+    // "Nodo actual no encontrado". Se lo decimos claro al admin.
+    const nodeExists = await isNodeActiveInFlow(supabase, auth.empresa_id, flowCode, nodeCode);
+    if (!nodeExists) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "El puntero de esta conversación quedó en un nodo que ya no existe en el flujo ('" +
+            nodeCode +
+            "'). Reiniciá la conversación desde soporte o pedile al cliente que escriba una palabra de arranque.",
+          invalid_current_node: true,
+        },
+        { status: 409 }
+      );
+    }
+
     if (sessionCompleted || isSorteoFinalTicketNode(nodeCode)) {
       return NextResponse.json(
         {
