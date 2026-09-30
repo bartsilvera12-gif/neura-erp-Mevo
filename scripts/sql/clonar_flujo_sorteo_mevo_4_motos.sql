@@ -17,20 +17,43 @@
 
 
 -- =============================================================================
--- PASO 1 — correr SOLO esta consulta y copiar el data_schema de Mevo.
+-- PASO 1 — correr SOLO esta consulta: dice en qué esquema viven las tablas
+--          del chat y de sorteos (en la mayoría de las bases es "public";
+--          en instalaciones multiempresa es el data_schema del tenant).
 -- =============================================================================
 
-SELECT id, nombre, data_schema
-FROM zentra_erp.empresas
-WHERE nombre ILIKE '%mevo%';
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_name IN (
+        'chat_flows', 'chat_flow_nodes', 'chat_flow_options',
+        'chat_flow_node_blocks', 'sorteos'
+      )
+ORDER BY table_schema, table_name;
 
 
 -- =============================================================================
--- PASO 2 — poner el data_schema en la línea de abajo y ejecutar TODO el paso 2
---          de una sola vez (seleccionar desde el SET hasta el final y Run).
+-- PASO 2 — poner ese esquema en la línea de abajo (si el paso 1 devolvió
+--          "public", dejar public) y ejecutar TODO el paso 2 de una sola vez
+--          (seleccionar desde el SET hasta el final y Run).
 -- =============================================================================
 
-SET search_path TO erp_mevo_REEMPLAZAR_ACA, zentra_erp, public;
+SET search_path TO public;
+
+
+-- 2.0) Control previo: así se llaman los flujos y sorteos que se van a usar.
+--      El origen tiene que ser el único con "auris" y el destino el único
+--      con "4 motos".
+
+SELECT flow_code, label, activo, sorteo_id
+FROM chat_flows
+WHERE label ILIKE '%auris%' OR label ILIKE '%4 motos%'
+   OR flow_code ILIKE '%auris%' OR flow_code ILIKE '%4_motos%'
+ORDER BY label;
+
+SELECT id, nombre, precio_por_boleto, estado
+FROM sorteos
+WHERE nombre ILIKE '%auris%' OR nombre ILIKE '%4 motos%'
+ORDER BY nombre;
 
 
 -- 2.1) Contexto resuelto (flujo origen, flujo destino, nodo de bienvenida,
