@@ -17,27 +17,32 @@
 
 
 -- =============================================================================
--- PASO 1 — correr SOLO esta consulta: dice en qué esquema viven las tablas
---          del chat y de sorteos (en la mayoría de las bases es "public";
---          en instalaciones multiempresa es el data_schema del tenant).
+-- PASO 1 — correr SOLO esta consulta: busca, entre todos los esquemas de
+--          empresa, en cuál están los flujos del sorteo. El esquema con el
+--          mayor "flujos_match" (deberían ser 2: el Auris y el de 4 motos) es
+--          el de Mevo, y es el que va en el SET del paso 2.
 -- =============================================================================
 
-SELECT table_schema, table_name
-FROM information_schema.tables
-WHERE table_name IN (
-        'chat_flows', 'chat_flow_nodes', 'chat_flow_options',
-        'chat_flow_node_blocks', 'sorteos'
-      )
-ORDER BY table_schema, table_name;
+SELECT t.table_schema,
+       (xpath('/row/c/text()', query_to_xml(
+          format(
+            'select count(*) as c from %I.chat_flows
+              where label ilike ''%%auris%%'' or label ilike ''%%4 motos%%''',
+            t.table_schema
+          ), false, true, '')))[1]::text::int AS flujos_match
+FROM information_schema.tables t
+WHERE t.table_name = 'chat_flows'
+ORDER BY flujos_match DESC NULLS LAST, t.table_schema
+LIMIT 20;
 
 
 -- =============================================================================
--- PASO 2 — poner ese esquema en la línea de abajo (si el paso 1 devolvió
---          "public", dejar public) y ejecutar TODO el paso 2 de una sola vez
---          (seleccionar desde el SET hasta el final y Run).
+-- PASO 2 — poner el esquema que devolvió el paso 1 en la línea de abajo y
+--          ejecutar TODO el paso 2 de una sola vez (seleccionar desde el SET
+--          hasta el final y Run).
 -- =============================================================================
 
-SET search_path TO public;
+SET search_path TO ESQUEMA_DE_MEVO;
 
 
 -- 2.0) Control previo: así se llaman los flujos y sorteos que se van a usar.
