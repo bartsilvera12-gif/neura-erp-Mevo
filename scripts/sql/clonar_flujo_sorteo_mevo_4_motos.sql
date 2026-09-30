@@ -17,48 +17,30 @@
 
 
 -- =============================================================================
--- PASO 1 — correr SOLO esta consulta: busca, entre todos los esquemas de
---          empresa, en cuál están los flujos del sorteo. El esquema con el
---          mayor "flujos_match" (deberían ser 2: el Auris y el de 4 motos) es
---          el de Mevo, y es el que va en el SET del paso 2.
+-- PASO 1 — ver los flujos del tenant y anotar los dos flow_code que se usan.
 -- =============================================================================
 
-SELECT t.table_schema,
-       (xpath('/row/c/text()', query_to_xml(
-          format(
-            'select count(*) as c from %I.chat_flows
-              where label ilike ''%%auris%%'' or label ilike ''%%4 motos%%''',
-            t.table_schema
-          ), false, true, '')))[1]::text::int AS flujos_match
-FROM information_schema.tables t
-WHERE t.table_name = 'chat_flows'
-ORDER BY flujos_match DESC NULLS LAST, t.table_schema
-LIMIT 20;
-
-
--- =============================================================================
--- PASO 2 — poner el esquema que devolvió el paso 1 en la línea de abajo y
---          ejecutar TODO el paso 2 de una sola vez (seleccionar desde el SET
---          hasta el final y Run).
--- =============================================================================
-
-SET search_path TO ESQUEMA_DE_MEVO;
-
-
--- 2.0) Control previo: así se llaman los flujos y sorteos que se van a usar.
---      El origen tiene que ser el único con "auris" y el destino el único
---      con "4 motos".
+SET search_path TO mevoerp;
 
 SELECT flow_code, label, activo, sorteo_id
 FROM chat_flows
-WHERE label ILIKE '%auris%' OR label ILIKE '%4 motos%'
-   OR flow_code ILIKE '%auris%' OR flow_code ILIKE '%4_motos%'
-ORDER BY label;
+ORDER BY flow_code;
 
-SELECT id, nombre, precio_por_boleto, estado
-FROM sorteos
-WHERE nombre ILIKE '%auris%' OR nombre ILIKE '%4 motos%'
-ORDER BY nombre;
+SELECT flow_code, count(*) AS nodos, count(*) FILTER (WHERE is_active) AS activos
+FROM chat_flow_nodes
+GROUP BY flow_code
+ORDER BY flow_code;
+
+SELECT id, nombre, estado FROM sorteos ORDER BY nombre;
+
+
+-- =============================================================================
+-- PASO 2 — completar los dos flow_code marcados abajo (origen = flujo del
+--          Auris que se copia, destino = flujo de las 4 motos que se rehace)
+--          y ejecutar TODO el paso 2 de una sola vez.
+-- =============================================================================
+
+SET search_path TO mevoerp;
 
 
 -- 2.1) Contexto resuelto (flujo origen, flujo destino, nodo de bienvenida,
@@ -78,7 +60,7 @@ CREATE TEMP TABLE _mevo_ctx (
 
 INSERT INTO _mevo_ctx (empresa_id, src_flow, dst_flow, welcome_node, next_node, sorteo_id)
 SELECT
-  d.empresa_id,
+  s.empresa_id,
   s.flow_code,
   d.flow_code,
   w.node_code,
@@ -98,14 +80,11 @@ SELECT
       ORDER BY o.sort_order
       LIMIT 1)
   ),
-  (SELECT r.id FROM sorteos r
-    WHERE r.empresa_id = d.empresa_id AND r.nombre ILIKE '%4_motos%'
-    ORDER BY r.created_at
-    LIMIT 1)
-FROM chat_flows d
-JOIN chat_flows s
-  ON s.empresa_id = d.empresa_id
- AND (s.label ILIKE '%auris%' OR s.flow_code ILIKE '%auris%')
+  'c5da300e-e01d-4703-9863-086305568500'::uuid      -- sorteo "Sorteo Mevo 4 Motos"
+FROM chat_flows s
+JOIN chat_flows d
+  ON d.empresa_id = s.empresa_id
+ AND d.flow_code = 'FLOW_CODE_DESTINO'              -- <<< flujo de las 4 motos (se rehace)
 CROSS JOIN LATERAL (
   SELECT n.id, n.node_code
     FROM chat_flow_nodes n
@@ -113,7 +92,7 @@ CROSS JOIN LATERAL (
    ORDER BY (n.node_code ~* 'bienvenid|inicio|welcome|start') DESC, n.sort_order
    LIMIT 1
 ) w
-WHERE (d.label ILIKE '%4 motos%' OR d.flow_code ILIKE '%4_motos%');
+WHERE s.flow_code = 'FLOW_CODE_ORIGEN';             -- <<< flujo del Auris (se copia)
 
 -- Freno: si el contexto quedó vacío, esto corta con "division by zero".
 SELECT 1 / (SELECT count(*) FROM _mevo_ctx)::int AS contexto_ok;
