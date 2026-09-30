@@ -84,7 +84,7 @@ SELECT
 FROM chat_flows s
 JOIN chat_flows d
   ON d.empresa_id = s.empresa_id
- AND d.flow_code = 'FLOW_CODE_DESTINO'              -- <<< flujo de las 4 motos (se rehace)
+ AND d.flow_code = 'sorteo_4_motos'                 -- flujo de las 4 motos (se rehace)
 CROSS JOIN LATERAL (
   SELECT n.id, n.node_code
     FROM chat_flow_nodes n
@@ -92,7 +92,7 @@ CROSS JOIN LATERAL (
    ORDER BY (n.node_code ~* 'bienvenid|inicio|welcome|start') DESC, n.sort_order
    LIMIT 1
 ) w
-WHERE s.flow_code = 'FLOW_CODE_ORIGEN';             -- <<< flujo del Auris (se copia)
+WHERE s.flow_code = 'sorteo_mevo_3motos';            -- flujo del Auris (se copia)
 
 -- Freno: si el contexto quedó vacío, esto corta con "division by zero".
 SELECT 1 / (SELECT count(*) FROM _mevo_ctx)::int AS contexto_ok;
