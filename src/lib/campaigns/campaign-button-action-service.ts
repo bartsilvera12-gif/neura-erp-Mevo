@@ -17,6 +17,8 @@ import {
   resolveOutboundTextContextFromConversationId,
   sendOutboundTextMessage,
 } from "@/lib/chat/outbound-send-dispatch";
+import { persistOutgoingChatMessage } from "@/lib/chat/outgoing-message-persist";
+import type { AppSupabaseClient } from "@/lib/supabase/schema";
 
 const LOG_RX = "[campaign-button-action][received]";
 const LOG_MT = "[campaign-button-action][matched]";
@@ -134,6 +136,34 @@ async function loadActionsForCampaign(
     .eq("campaign_id", campaignId);
   if (error) return [];
   return (data ?? []) as CampaignButtonActionRow[];
+}
+
+/**
+ * `send_text` es una respuesta suelta, no un recorrido del bot: tras enviarla la conversación
+ * pasa a atención humana para que quede como pendiente en el inbox y el motor de flujos no
+ * siga respondiendo encima del asesor.
+ */
+async function handOffConversationToInbox(params: {
+  supabase: SupabaseAdmin;
+  conversationId: string;
+  empresaId: string;
+}): Promise<void> {
+  const { error } = await params.supabase
+    .from("chat_conversations")
+    .update({
+      flow_status: "human",
+      human_taken_over: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", params.conversationId)
+    .eq("empresa_id", params.empresaId);
+  if (error) {
+    console.warn(LOG_ER, "handoff_to_inbox_failed", {
+      empresa_id: params.empresaId,
+      conversation_id: params.conversationId,
+      error: error.message,
+    });
+  }
 }
 
 function pickMatchingAction(
@@ -429,6 +459,26 @@ export async function executeCampaignButtonActionForMatchedRecipient(params: {
         });
         return { handled: false };
       }
+      await persistOutgoingChatMessage(params.supabase as unknown as AppSupabaseClient, {
+        conversation: { id: params.conversationId, empresa_id: params.empresaId },
+        content: body.slice(0, 4096),
+        messageType: "text",
+        waMessageId: send.waMessageId ?? null,
+        raw: {
+          source: "campaign_button_action",
+          campaign_id: params.campaignId,
+          button_id: logicalButtonId,
+        },
+        senderType: "system",
+        automationSource: "campaign_button_action",
+      });
+
+      await handOffConversationToInbox({
+        supabase: params.supabase,
+        conversationId: params.conversationId,
+        empresaId: params.empresaId,
+      });
+
       await recordExecuted({
         supabase: params.supabase,
         empresaId: params.empresaId,
@@ -441,7 +491,7 @@ export async function executeCampaignButtonActionForMatchedRecipient(params: {
         flowCode: null,
         startNodeCode: null,
         waMessageId: params.waMessageId ?? null,
-        detail: { outbound_ok: true },
+        detail: { outbound_ok: true, handed_off_to_inbox: true },
       });
       console.info(LOG_EX, {
         empresa_id: params.empresaId,
