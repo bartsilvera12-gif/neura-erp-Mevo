@@ -190,23 +190,35 @@ function buildEntradaWhereParts(
     i++;
   }
   if (p.q && p.q.length > 0) {
-    const term = `%${p.q.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+    const raw = p.q.trim();
     if (cuponSearchTable) {
+      // Buscar por N.º de cupón = coincidencia EXACTA por valor (tolera ceros a la izquierda),
+      // NO "contiene": así "0111" trae el cupón 0111 y no 10111 / 20111 / 40111.
       conds.push(
         `EXISTS (SELECT 1 FROM ${cuponSearchTable} cbsq
            WHERE cbsq.entrada_id = ${a}id AND cbsq.empresa_id = ${a}empresa_id
-             AND cbsq.numero_cupon ILIKE $${i} ESCAPE '\\')`
+             AND (
+               cbsq.numero_cupon = $${i}
+               OR CASE
+                    WHEN $${i} ~ '^[0-9]+$' AND cbsq.numero_cupon ~ '^[0-9]+$'
+                    THEN CAST(cbsq.numero_cupon AS bigint) = CAST($${i} AS bigint)
+                    ELSE false
+                  END
+             ))`
       );
+      params.push(raw);
+      i++;
     } else {
+      const term = `%${raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
       conds.push(
         `(${a}nombre_participante ILIKE $${i} ESCAPE '\\'
           OR COALESCE(${a}documento::text, '') ILIKE $${i} ESCAPE '\\'
           OR ${a}whatsapp_numero ILIKE $${i} ESCAPE '\\'
           OR CAST(${a}numero_orden AS text) ILIKE $${i} ESCAPE '\\')`
       );
+      params.push(term);
+      i++;
     }
-    params.push(term);
-    i++;
   }
   if (p.desdeUtc) {
     conds.push(`${a}created_at >= $${i}::timestamptz`);
@@ -222,6 +234,12 @@ function buildEntradaWhereParts(
     conds.push(`${a}estado_pago = $${i}::text`);
     params.push(p.estadoPago);
     i++;
+  } else if (cuponSearchTable && p.q && p.q.length > 0) {
+    /**
+     * Búsqueda puntual por N.º de cupón: se muestra la orden AUNQUE esté rechazada.
+     * Si no, un cupón de una orden anulada "no aparece" y parece que no existe.
+     * (El padrón general —sin búsqueda— sigue ocultando rechazadas más abajo.)
+     */
   } else {
     /**
      * Sin filtro explícito NO se listan las órdenes rechazadas: de acá sale el padrón
@@ -687,13 +705,21 @@ async function fetchSorteoCuponesOrdenesPostgrest(
   if (listParams.sorteoId) qb = qb.eq("sorteo_id", listParams.sorteoId);
   if (listParams.desdeUtc) qb = qb.gte("created_at", listParams.desdeUtc);
   if (listParams.hastaUtc) qb = qb.lt("created_at", listParams.hastaUtc);
-  /** Sin filtro explícito, las rechazadas quedan fuera del listado (ver buildEntradaWhereParts). */
+  const hasCuponQuery = Boolean(listParams.q && listParams.q.length > 0);
+  /** Sin filtro explícito las rechazadas quedan fuera —salvo que se busque un cupón puntual. */
   if (listParams.estadoPago) qb = qb.eq("estado_pago", listParams.estadoPago);
-  else qb = qb.neq("estado_pago", "rechazado");
-  if (listParams.q && listParams.q.length > 0) {
-    // Vista «Cupones»: buscar SOLO por número de cupón (recurso embebido, join inner).
-    const t = `%${listParams.q}%`;
-    qb = qb.ilike("sorteo_cupones.numero_cupon", t);
+  else if (!hasCuponQuery) qb = qb.neq("estado_pago", "rechazado");
+  if (hasCuponQuery) {
+    // Vista «Cupones»: coincidencia EXACTA del número de cupón (tolera ceros a la izquierda),
+    // NO "contiene": "0111" trae el 0111, no 10111 / 20111 / 40111.
+    const raw = (listParams.q ?? "").trim();
+    const variants = new Set<string>([raw]);
+    if (/^[0-9]+$/.test(raw)) {
+      const n = String(parseInt(raw, 10));
+      variants.add(n);
+      variants.add(n.padStart(4, "0"));
+    }
+    qb = qb.in("sorteo_cupones.numero_cupon", Array.from(variants));
   }
 
   const { data: entradasRaw, error: e1, count } = await qb
