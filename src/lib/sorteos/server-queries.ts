@@ -220,12 +220,15 @@ function buildEntradaWhereParts(
       i++;
     }
   }
-  if (p.desdeUtc) {
+  // Búsqueda puntual por N.º de cupón: se ignora el rango de fechas (el cupón debe
+  // aparecer exista cuando exista). El listado normal sí respeta desde/hasta.
+  const cuponPuntual = Boolean(cuponSearchTable && p.q && p.q.length > 0);
+  if (p.desdeUtc && !cuponPuntual) {
     conds.push(`${a}created_at >= $${i}::timestamptz`);
     params.push(p.desdeUtc);
     i++;
   }
-  if (p.hastaUtc) {
+  if (p.hastaUtc && !cuponPuntual) {
     conds.push(`${a}created_at < $${i}::timestamptz`);
     params.push(p.hastaUtc);
     i++;
@@ -703,9 +706,10 @@ async function fetchSorteoCuponesOrdenesPostgrest(
     .eq("empresa_id", empresaId);
 
   if (listParams.sorteoId) qb = qb.eq("sorteo_id", listParams.sorteoId);
-  if (listParams.desdeUtc) qb = qb.gte("created_at", listParams.desdeUtc);
-  if (listParams.hastaUtc) qb = qb.lt("created_at", listParams.hastaUtc);
   const hasCuponQuery = Boolean(listParams.q && listParams.q.length > 0);
+  // En búsqueda puntual por N.º de cupón se ignora el rango de fechas (igual que el estado).
+  if (listParams.desdeUtc && !hasCuponQuery) qb = qb.gte("created_at", listParams.desdeUtc);
+  if (listParams.hastaUtc && !hasCuponQuery) qb = qb.lt("created_at", listParams.hastaUtc);
   /** Sin filtro explícito las rechazadas quedan fuera —salvo que se busque un cupón puntual. */
   if (listParams.estadoPago) qb = qb.eq("estado_pago", listParams.estadoPago);
   else if (!hasCuponQuery) qb = qb.neq("estado_pago", "rechazado");
