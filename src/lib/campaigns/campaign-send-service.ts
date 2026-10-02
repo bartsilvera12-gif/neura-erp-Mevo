@@ -10,7 +10,7 @@ import {
   templateSnapshotHasHeaderImage,
 } from "@/lib/campaigns/campaign-header-image";
 import {
-  buildCampaignTemplatePreviewText,
+  buildCampaignTemplateBodyText,
   buildMetaCloudTemplatePayload,
   extractBodyPlaceholderKeysOrdered,
   logCampaignTemplateVarsResolved,
@@ -167,12 +167,14 @@ async function persistCampaignTemplateOutboundMessage(params: {
   mappedBySlot: Record<string, string>;
   providerLabel: string;
 }): Promise<void> {
-  const previewText = buildCampaignTemplatePreviewText({
-    templateName: params.campaign.template_name,
-    languageCode: params.campaign.template_language,
+  // Contenido guardado en el chat = SOLO el cuerpo de la plantilla (lo que ve el
+  // cliente). No se antepone el nombre técnico de la plantilla, que antes quedaba
+  // visible en la bandeja (ej. "Plantilla: temario_o_devolucion_ · es").
+  const bodyText = buildCampaignTemplateBodyText({
     componentsSnapshot: params.campaign.template_components_json as unknown[],
     mappedBySlot: params.mappedBySlot,
   });
+  const previewText = bodyText || "(Mensaje de plantilla enviado)";
   const ts = new Date().toISOString();
   const rawPayload: Record<string, unknown> = {
     source: "campaign_outbound",

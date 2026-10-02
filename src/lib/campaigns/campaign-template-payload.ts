@@ -5,6 +5,7 @@
 import "server-only";
 
 export {
+  buildCampaignTemplateBodyText,
   buildCampaignTemplatePreviewText,
   extractBodyPlaceholderKeysOrdered,
   extractBodyPlaceholderKeysOrderedFromText,

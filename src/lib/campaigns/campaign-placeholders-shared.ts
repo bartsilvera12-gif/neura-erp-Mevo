@@ -64,9 +64,11 @@ export function extractBodyVariableSlotsOrdered(componentsJson: unknown[]): stri
   return extractNumericSlots(getBodyComponentText(componentsJson));
 }
 
-export function buildCampaignTemplatePreviewText(params: {
-  templateName: string;
-  languageCode: string;
+/**
+ * Cuerpo de la plantilla con los placeholders ya reemplazados por sus valores.
+ * Es el texto tal como lo recibe el cliente (sin el nombre técnico de la plantilla).
+ */
+export function buildCampaignTemplateBodyText(params: {
   componentsSnapshot: unknown[];
   mappedBySlot: Record<string, string>;
 }): string {
@@ -82,6 +84,24 @@ export function buildCampaignTemplatePreviewText(params: {
       return v !== undefined && v !== null ? String(v).trim() : `{{${key}}}`;
     });
   }
+  return bodyText;
+}
+
+/**
+ * Vista previa para el editor de campañas: incluye el nombre de la plantilla
+ * como título. NO usar para el contenido que se guarda en el chat (ahí va solo
+ * el cuerpo, ver buildCampaignTemplateBodyText).
+ */
+export function buildCampaignTemplatePreviewText(params: {
+  templateName: string;
+  languageCode: string;
+  componentsSnapshot: unknown[];
+  mappedBySlot: Record<string, string>;
+}): string {
+  const bodyText = buildCampaignTemplateBodyText({
+    componentsSnapshot: params.componentsSnapshot,
+    mappedBySlot: params.mappedBySlot,
+  });
   const title = `Plantilla: ${params.templateName} · ${params.languageCode}`;
   if (bodyText) return `${title}\n\n${bodyText}`;
   return `${title}\n\n(Sin cuerpo de texto en snapshot)`;
