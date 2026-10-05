@@ -83,6 +83,7 @@ export default async function SorteoGanadorPage({
         <span className="rounded-xl bg-[#4FAEB2] px-4 py-2 text-sm font-semibold text-white shadow-md shadow-[#4FAEB2]/30">
           Ganador
         </span>
+        <Link href="/sorteos/canales" className={tabClass}>Canales</Link>
       </div>
 
       {/* Buscador */}
