@@ -43,13 +43,18 @@ export default async function SorteoCanalesPage({
 }) {
   const sp = await Promise.resolve(searchParams ?? {});
   const sorteoId = pickStr(sp, "sorteo_id")?.trim() || undefined;
+  const isYmd = (v: string | undefined): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const desdeRaw = pickStr(sp, "desde")?.trim();
+  const hastaRaw = pickStr(sp, "hasta")?.trim();
+  const desde = isYmd(desdeRaw) ? desdeRaw : undefined;
+  const hasta = isYmd(hastaRaw) ? hastaRaw : undefined;
 
   const { sorteos } = await fetchSorteosListServer();
   const defaultSorteoId = pickDefaultSorteoId(sorteos);
   const selectedSorteoId = sorteoId === "all" ? null : sorteoId ?? defaultSorteoId ?? null;
   const selectValue = sorteoId === "all" ? "all" : sorteoId ?? defaultSorteoId ?? "all";
 
-  const { data: rows, error } = await fetchVentasPorCanalServer(selectedSorteoId);
+  const { data: rows, error } = await fetchVentasPorCanalServer(selectedSorteoId, desde, hasta);
 
   // Facebook/Instagram arriba; "Sin anuncio" al final. TikTok se muestra siempre (aunque sea 0).
   const orden = (c: CanalVenta) => {
@@ -136,13 +141,44 @@ export default async function SorteoCanalesPage({
               <option value="all">Todos los sorteos</option>
             </select>
           </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Fecha desde</span>
+            <input
+              type="date"
+              name="desde"
+              defaultValue={desde ?? ""}
+              max={hasta ?? undefined}
+              className="w-[160px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Fecha hasta</span>
+            <input
+              type="date"
+              name="hasta"
+              defaultValue={hasta ?? ""}
+              min={desde ?? undefined}
+              className="w-[160px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors hover:border-[#4FAEB2]/60 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20"
+            />
+          </label>
           <button
             type="submit"
             className="rounded-xl bg-[#4FAEB2] px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-[#4FAEB2]/25 transition-colors hover:bg-[#3F8E91]"
           >
             Ver reporte
           </button>
+          <Link
+            href="/sorteos/canales"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-[#4FAEB2]/60 hover:bg-[#4FAEB2]/5 hover:text-[#3F8E91]"
+          >
+            Limpiar
+          </Link>
         </div>
+        {desde || hasta ? (
+          <p className="mt-3 text-xs font-medium text-slate-600">
+            Período: {desde ?? "inicio"} → {hasta ?? "hoy"}
+          </p>
+        ) : null}
       </form>
 
       {error ? (
