@@ -204,6 +204,7 @@ const MENU_STRUCTURE: MenuItem[] = [
       { label: "Vendedores", href: "/mercaderia/vendedores" },
       { label: "Ventas", href: "/mercaderia/ventas" },
       { label: "Registrar venta", href: "/mercaderia/nueva-venta" },
+      { label: "Stock e inversión", href: "/mercaderia/stock-inversion" },
       { label: "Rendiciones", href: "/mercaderia/rendiciones" },
     ],
   },
