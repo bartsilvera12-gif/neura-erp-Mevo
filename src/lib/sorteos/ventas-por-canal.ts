@@ -8,6 +8,7 @@ import {
 import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { getEmpresaIdForCurrentUserServer } from "@/lib/supabase/empresa-data-server";
+import { asuncionDateStartUtc, asuncionDateEndExclusiveUtc } from "@/lib/sorteos/kpis-time-bounds";
 
 /**
  * Reporte de ventas por canal de publicidad.
@@ -40,7 +41,11 @@ const CANAL_CASE = `
   END`;
 
 export async function fetchVentasPorCanalServer(
-  sorteoId: string | null
+  sorteoId: string | null,
+  /** Día calendario 'YYYY-MM-DD' (Asunción) desde el cual contar ventas. */
+  desde?: string | null,
+  /** Día calendario 'YYYY-MM-DD' (Asunción) hasta el cual contar (inclusive). */
+  hasta?: string | null
 ): Promise<VentasPorCanalResult> {
   const empresaId = await getEmpresaIdForCurrentUserServer();
   if (!empresaId) return { data: [], error: "Sin sesión o empresa." };
@@ -65,6 +70,20 @@ export async function fetchVentasPorCanalServer(
     sorteoCond = `AND se.sorteo_id = $${params.length}::uuid`;
   }
 
+  // Rango de fechas (día calendario de Asunción) sobre la fecha de la venta.
+  const desdeUtc = desde ? asuncionDateStartUtc(desde.trim()) : null;
+  const hastaUtc = hasta ? asuncionDateEndExclusiveUtc(hasta.trim()) : null;
+  let fechaCond = "";
+  if (desdeUtc) {
+    params.push(desdeUtc);
+    fechaCond += ` AND se.created_at >= $${params.length}::timestamptz`;
+  }
+  if (hastaUtc) {
+    params.push(hastaUtc);
+    fechaCond += ` AND se.created_at < $${params.length}::timestamptz`;
+  }
+  const scopeCond = `${sorteoCond}${fechaCond}`;
+
   // `ref`: primer referral por conversación, acotado a las conversaciones que
   // tienen una entrada en el alcance (barrido de chat_messages por conversación,
   // no sobre toda la tabla).
@@ -72,7 +91,7 @@ export async function fetchVentasPorCanalServer(
     WITH conv AS (
       SELECT DISTINCT se.chat_conversation_id AS cid
       FROM ${tEnt} se
-      WHERE se.empresa_id = $1::uuid ${sorteoCond}
+      WHERE se.empresa_id = $1::uuid ${scopeCond}
         AND se.chat_conversation_id IS NOT NULL
     ),
     ref AS (
@@ -91,7 +110,7 @@ export async function fetchVentasPorCanalServer(
            COALESCE(round(AVG(se.monto_total)), 0)::bigint AS ticket_promedio
     FROM ${tEnt} se
     LEFT JOIN ref ON ref.conversation_id = se.chat_conversation_id
-    WHERE se.empresa_id = $1::uuid ${sorteoCond}
+    WHERE se.empresa_id = $1::uuid ${scopeCond}
       AND se.estado_pago <> 'rechazado'
       AND se.monto_total > 0
     GROUP BY 1
