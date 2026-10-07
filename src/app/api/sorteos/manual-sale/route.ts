@@ -15,6 +15,7 @@ import {
   flowDataStubFromEntrada,
 } from "@/lib/sorteos/sorteo-ticket-admin";
 import { maybeGenerateAndSendSorteoTicketDelivery } from "@/lib/sorteos/sorteo-ticket-delivery";
+import { getMercRole } from "@/lib/mercaderia/roles";
 
 function isUuid(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s.trim());
@@ -31,6 +32,8 @@ export type ManualSaleBody = {
   observacion_interna?: string | null;
   generar_ticket_png?: boolean;
   idempotency_key?: string;
+  /** Vendedor al que se atribuye (solo lo usa el admin; el vendedor se fuerza a sí mismo). */
+  merc_vendedor_id?: string | null;
 };
 
 /**
@@ -92,6 +95,16 @@ export async function POST(request: NextRequest) {
     const empresaId = ctx.auth.empresa_id;
     const schema = await fetchDataSchemaForEmpresaId(empresaId);
 
+    // Atribución al vendedor: si quien genera es un vendedor, se fuerza su propio
+    // id (no puede atribuir a otro). Si es admin, puede elegir uno (opcional).
+    const role = await getMercRole();
+    const vendedorId =
+      role.mode === "vendedor"
+        ? role.vendedor?.id ?? null
+        : typeof body.merc_vendedor_id === "string" && body.merc_vendedor_id.trim()
+          ? body.merc_vendedor_id.trim()
+          : null;
+
     const created = await createSorteoManualCashSaleViaDirectPostgres({
       schema,
       empresaId,
@@ -105,6 +118,7 @@ export async function POST(request: NextRequest) {
       montoTotal,
       observacionInterna: observacion.length > 0 ? observacion : null,
       validadoPorUserId: ctx.auth.usuarioCatalogId ?? null,
+      vendedorId,
     });
 
     if (!created.ok) {

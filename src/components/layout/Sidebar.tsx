@@ -204,6 +204,8 @@ const MENU_STRUCTURE: MenuItem[] = [
       { label: "Vendedores", href: "/mercaderia/vendedores" },
       { label: "Ventas", href: "/mercaderia/ventas" },
       { label: "Registrar venta", href: "/mercaderia/nueva-venta" },
+      { label: "Generar boleta", href: "/mercaderia/generar-boleta" },
+      { label: "Comisiones por vendedor", href: "/mercaderia/mis-comisiones" },
       { label: "Stock e inversión", href: "/mercaderia/stock-inversion" },
       { label: "Rendiciones", href: "/mercaderia/rendiciones" },
     ],
@@ -567,6 +569,8 @@ export default function Sidebar() {
             { label: "Mi stock", href: "/mercaderia/mi-stock" },
             { label: "Registrar venta", href: "/mercaderia/nueva-venta" },
             { label: "Mis ventas", href: "/mercaderia/mis-ventas" },
+            { label: "Generar boleta", href: "/mercaderia/generar-boleta" },
+            { label: "Mis comisiones", href: "/mercaderia/mis-comisiones" },
           ],
         };
       }

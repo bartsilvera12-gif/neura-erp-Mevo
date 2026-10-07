@@ -46,6 +46,8 @@ export type SorteoManualCashInput = {
   montoTotal: number;
   observacionInterna?: string | null;
   validadoPorUserId?: string | null;
+  /** Vendedor (merc_vendedores.id) que generó la boleta en su local. Atribución. */
+  vendedorId?: string | null;
 };
 
 export type SorteoManualCashFail = { ok: false; message: string };
@@ -302,6 +304,9 @@ export async function createSorteoManualCashSaleViaDirectPostgres(
     }
     if (entCols.has("pago_metodo")) {
       rowEnt.pago_metodo = "efectivo";
+    }
+    if (entCols.has("merc_vendedor_id") && input.vendedorId?.trim()) {
+      rowEnt.merc_vendedor_id = input.vendedorId.trim();
     }
 
     const insertCols = Object.keys(rowEnt).filter((k) => entCols.has(k));
