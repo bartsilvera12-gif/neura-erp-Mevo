@@ -338,9 +338,6 @@ export function FlowRecontactAutomationsPanel(props: {
     rows: RecontactDryRunRow[];
   } | null>(null);
 
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkResult, setBulkResult] = useState<string | null>(null);
-
   const baseUrl = useMemo(
     () => `/api/chat/flows/${encodeURIComponent(flowCode)}/recontact-rules`,
     [flowCode]
@@ -360,35 +357,6 @@ export function FlowRecontactAutomationsPanel(props: {
       setLoading(false);
     }
   }, [baseUrl]);
-
-  const runBulkResend = useCallback(async (execute: boolean) => {
-    const label = execute ? "Ejecutar reenvío" : "Simular";
-    if (execute && !window.confirm(
-      "¿Reenviar el PASO ACTUAL del bot a las conversaciones inactivas de este flujo? Es acotado e idempotente, pero envía mensajes reales."
-    )) return;
-    setBulkBusy(true); setBulkResult(null); setError(null);
-    try {
-      const res = await fetchWithSupabaseSession(
-        `/api/chat/flows/${encodeURIComponent(flowCode)}/recontact-bulk-resend`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ execute }) }
-      );
-      const json = (await res.json()) as Record<string, unknown>;
-      if (!res.ok || !json.ok) throw new Error(String(json.error ?? "Falló"));
-      if (execute) {
-        setBulkResult(
-          `Enviados: ${json.enviados} · salteados: ${json.salteados} · errores: ${json.errores} · restantes: ${json.restantes}. ${json.done ? "Terminado." : "Volvé a ejecutar para continuar los restantes."}`
-        );
-      } else {
-        setBulkResult(
-          `Simulación — a enviar: ${json.a_enviar} (ya reenviados: ${json.ya_reenviados} · candidatos: ${json.candidatos_total}).`
-        );
-      }
-    } catch (e) {
-      setError(`${label}: ${e instanceof Error ? e.message : "error"}`);
-    } finally {
-      setBulkBusy(false);
-    }
-  }, [flowCode]);
 
   useEffect(() => {
     void load();
@@ -587,33 +555,6 @@ export function FlowRecontactAutomationsPanel(props: {
         >
           Nueva automatización
         </button>
-
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-3">
-          <p className="text-sm font-medium text-amber-900">Reenviar el paso a inactivos (one-shot)</p>
-          <p className="mt-1 text-xs text-amber-800/90">
-            Reenvía el mensaje del paso actual del bot a las conversaciones detenidas en este flujo.
-            Acotado (tope + delay), idempotente (no duplica) y con guardas. Simulá primero.
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={() => void runBulkResend(false)}
-              className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-            >
-              {bulkBusy ? "Procesando…" : "Simular"}
-            </button>
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={() => void runBulkResend(true)}
-              className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-            >
-              Ejecutar reenvío
-            </button>
-            {bulkResult && <span className="text-xs text-amber-900/90">{bulkResult}</span>}
-          </div>
-        </div>
       </div>
 
       {error && (
