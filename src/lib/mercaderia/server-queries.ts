@@ -4,6 +4,7 @@ import { getUserAndEmpresa } from "@/lib/middleware/auth";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
 import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
+import { asuncionDayBoundsUtc, asuncionMonthBoundsUtc } from "@/lib/sorteos/kpis-time-bounds";
 import type {
   MercAsignacion,
   MercProducto,
@@ -456,5 +457,88 @@ export async function getKpisPorVendedor(desde: string, hasta: string): Promise<
   } catch (e) {
     logErr("getKpisPorVendedor", e, { desde, hasta, schema: c.schema });
     return [];
+  }
+}
+
+export type ComisionesMercVendedorResult = {
+  /** Detalle de ventas (no anuladas) del vendedor en el período. */
+  rows: MercVenta[];
+  rangoMonto: number;
+  rangoComision: number;
+  totalAcumuladoMonto: number;
+  totalAcumuladoComision: number;
+  mesMonto: number;
+  mesComision: number;
+  error: string | null;
+};
+
+function emptyComisionesMerc(error: string | null): ComisionesMercVendedorResult {
+  return {
+    rows: [],
+    rangoMonto: 0,
+    rangoComision: 0,
+    totalAcumuladoMonto: 0,
+    totalAcumuladoComision: 0,
+    mesMonto: 0,
+    mesComision: 0,
+    error,
+  };
+}
+
+/**
+ * Comisiones de MERCADERÍA de un vendedor: usa la comisión ya registrada por
+ * venta (`merc_ventas.comision_total_snapshot`), que NO es un porcentaje sino
+ * el monto fijo por producto/escala. Devuelve el detalle del rango + acumulado
+ * total + mes actual, en el mismo formato que el reporte de boletas. Separado
+ * por completo de los sorteos (no toca `sorteo_entradas`). Excluye anuladas.
+ */
+export async function getComisionesMercVendedor(opts: {
+  vendedorId: string;
+  desde?: string | null;
+  hasta?: string | null;
+}): Promise<ComisionesMercVendedorResult> {
+  const vendedorId = opts.vendedorId?.trim();
+  if (!vendedorId) return emptyComisionesMerc("Vendedor no indicado.");
+  const c = await ctx();
+  if (!c) return emptyComisionesMerc("Sin sesión o empresa.");
+  try {
+    const pool = requirePool();
+    const tV = quoteSchemaTable(assertAllowedChatDataSchema(c.schema), "merc_ventas");
+
+    const isYmd = (v?: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+    const desde = isYmd(opts.desde) ? opts.desde : null;
+    const hasta = isYmd(opts.hasta) ? opts.hasta : null;
+    const mesInicio = asuncionMonthBoundsUtc().start.slice(0, 10);
+    const hoy = asuncionDayBoundsUtc().start.slice(0, 10);
+
+    const agg = await pool.query(
+      `select
+         coalesce(sum(monto_total_real), 0)::bigint as total_monto,
+         coalesce(sum(comision_total_snapshot), 0)::bigint as total_comision,
+         coalesce(sum(monto_total_real) filter (where fecha >= $3::date and fecha <= $4::date), 0)::bigint as mes_monto,
+         coalesce(sum(comision_total_snapshot) filter (where fecha >= $3::date and fecha <= $4::date), 0)::bigint as mes_comision,
+         coalesce(sum(monto_total_real) filter (where ($5::date is null or fecha >= $5::date) and ($6::date is null or fecha <= $6::date)), 0)::bigint as rango_monto,
+         coalesce(sum(comision_total_snapshot) filter (where ($5::date is null or fecha >= $5::date) and ($6::date is null or fecha <= $6::date)), 0)::bigint as rango_comision
+       from ${tV}
+        where empresa_id = $1::uuid and vendedor_id = $2::uuid and anulada = false`,
+      [c.empresa_id, vendedorId, mesInicio, hoy, desde, hasta]
+    );
+    const a = (agg.rows?.[0] ?? {}) as Record<string, unknown>;
+
+    const rows = await listVentas({ vendedorId, desde, hasta, anuladas: "excluir", limit: 500 });
+
+    return {
+      rows,
+      rangoMonto: num(a.rango_monto),
+      rangoComision: num(a.rango_comision),
+      totalAcumuladoMonto: num(a.total_monto),
+      totalAcumuladoComision: num(a.total_comision),
+      mesMonto: num(a.mes_monto),
+      mesComision: num(a.mes_comision),
+      error: null,
+    };
+  } catch (e) {
+    logErr("getComisionesMercVendedor", e, { vendedorId, schema: c.schema });
+    return emptyComisionesMerc("No se pudo cargar el reporte. Intentá de nuevo en unos segundos.");
   }
 }
