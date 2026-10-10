@@ -18,6 +18,9 @@ const TABS_VENDEDOR: Tab[] = [
   { href: "/mercaderia/mi-stock", label: "Mi stock", match: (p) => p === "/mercaderia/mi-stock" || p === "/mercaderia" },
   { href: "/mercaderia/nueva-venta", label: "Registrar venta", match: (p) => p.startsWith("/mercaderia/nueva-venta") },
   { href: "/mercaderia/mis-ventas", label: "Mis ventas", match: (p) => p.startsWith("/mercaderia/mis-ventas") },
+  // Comisión exacta (boletas) vs. prefijo (mercadería): "/mis-comisiones" es prefijo de "/mis-comisiones-mercaderia".
+  { href: "/mercaderia/mis-comisiones", label: "Comisiones boletas", match: (p) => p === "/mercaderia/mis-comisiones" },
+  { href: "/mercaderia/mis-comisiones-mercaderia", label: "Comisiones mercadería", match: (p) => p.startsWith("/mercaderia/mis-comisiones-mercaderia") },
 ];
 
 export default function MercaderiaNav({ mode }: { mode: "admin" | "vendedor" }) {
