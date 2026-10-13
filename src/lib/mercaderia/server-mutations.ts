@@ -5,6 +5,7 @@ import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema"
 import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
 import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 import { calcularOperacion, utilidad } from "./escala";
+import { normalizeOrigen } from "./origen";
 import type { MercProducto, TipoVenta } from "./types";
 
 const LOG = "[mercaderia][mut]";
@@ -268,6 +269,8 @@ export type VentaInput = {
   monto_total_real: number;
   lineas: Array<{ producto_id: string; cantidad: number }>;
   notas?: string | null;
+  /** Origen de la venta (publicidad / habitual). Ver lib/mercaderia/origen.ts */
+  origen?: string | null;
 };
 
 export async function registrarVenta(input: VentaInput): Promise<{ ok: boolean; id?: string; error?: string }> {
@@ -350,27 +353,36 @@ export async function registrarVenta(input: VentaInput): Promise<{ ok: boolean; 
       const util = utilidad(monto, op.costo_total, op.comision_total);
       const fecha = (input.fecha ?? "").trim() || new Date().toISOString().slice(0, 10);
 
+      // El origen es opcional y la columna puede no existir en todos los tenants;
+      // se incluye en el INSERT solo si la columna `origen` está presente.
+      const origen = normalizeOrigen(input.origen);
+      const hasOrigen =
+        (
+          await client.query(
+            `SELECT 1 FROM information_schema.columns
+              WHERE table_schema = $1 AND table_name = 'merc_ventas' AND column_name = 'origen' LIMIT 1`,
+            [schema]
+          )
+        ).rows.length > 0;
+
+      const cols = [
+        "empresa_id", "vendedor_id", "fecha", "tipo", "monto_total_real",
+        "costo_total_snapshot", "comision_total_snapshot", "utilidad_snapshot",
+        "notas", "creado_por",
+      ];
+      const vals: unknown[] = [
+        c.empresa_id, input.vendedor_id, fecha, tipo, monto,
+        op.costo_total, op.comision_total, util,
+        input.notas ? String(input.notas).trim() : null, c.user_id,
+      ];
+      if (hasOrigen) {
+        cols.push("origen");
+        vals.push(origen);
+      }
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
       const insV = await client.query<{ id: string }>(
-        `insert into ${tV}
-          (empresa_id, vendedor_id, fecha, tipo, monto_total_real,
-           costo_total_snapshot, comision_total_snapshot, utilidad_snapshot,
-           notas, creado_por)
-         values ($1::uuid, $2::uuid, $3::date, $4::text, $5::numeric,
-                 $6::numeric, $7::numeric, $8::numeric,
-                 $9::text, $10::uuid)
-         returning id`,
-        [
-          c.empresa_id,
-          input.vendedor_id,
-          fecha,
-          tipo,
-          monto,
-          op.costo_total,
-          op.comision_total,
-          util,
-          input.notas ? String(input.notas).trim() : null,
-          c.user_id,
-        ]
+        `insert into ${tV} (${cols.join(", ")}) values (${placeholders}) returning id`,
+        vals
       );
       const ventaId = insV.rows[0].id;
 
