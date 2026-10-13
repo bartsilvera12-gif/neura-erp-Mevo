@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
     monto_total_real: body.monto_total_real,
     lineas: body.lineas,
     notas: body.notas ?? null,
+    origen: body.origen ?? null,
   });
   return NextResponse.json(res, { status: res.ok ? 200 : 400 });
 }

@@ -207,6 +207,7 @@ const MENU_STRUCTURE: MenuItem[] = [
       { label: "Generar boleta", href: "/mercaderia/generar-boleta" },
       { label: "Comisiones boletas", href: "/mercaderia/mis-comisiones" },
       { label: "Comisiones mercadería", href: "/mercaderia/mis-comisiones-mercaderia" },
+      { label: "Ventas por origen", href: "/mercaderia/ventas-por-origen" },
       { label: "Stock e inversión", href: "/mercaderia/stock-inversion" },
       { label: "Rendiciones", href: "/mercaderia/rendiciones" },
     ],

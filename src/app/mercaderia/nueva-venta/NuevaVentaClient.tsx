@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { calcularOperacion, utilidad } from "@/lib/mercaderia/escala";
+import { MERC_ORIGENES } from "@/lib/mercaderia/origen";
 import type {
   MercProducto,
   MercStockVendedor,
@@ -42,6 +43,7 @@ export default function NuevaVentaClient({
   const [lineas, setLineas] = useState<Linea[]>([{ producto_id: productos[0]?.id ?? "", cantidad: 1 }]);
   const [monto, setMonto] = useState<string>("");
   const [notas, setNotas] = useState("");
+  const [origen, setOrigen] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -107,6 +109,7 @@ export default function NuevaVentaClient({
           monto_total_real: m,
           lineas: op.lineas.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad })),
           notas: notas.trim() || null,
+          origen: origen || null,
         }),
       });
       const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; id?: string };
@@ -115,6 +118,7 @@ export default function NuevaVentaClient({
       setLineas([{ producto_id: productos[0]?.id ?? "", cantidad: 1 }]);
       setMonto("");
       setNotas("");
+      setOrigen("");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
@@ -308,6 +312,29 @@ export default function NuevaVentaClient({
             <span className="text-[11px] text-slate-500">
               Es lo que efectivamente pagó el cliente. Puede ser distinto al precio de referencia si negociaron.
             </span>
+          </div>
+          <div className="mt-3 flex flex-col gap-1.5 text-xs text-slate-600">
+            <span className="font-semibold text-slate-700">¿De dónde vino el cliente? (opcional)</span>
+            <div className="flex flex-wrap gap-2">
+              {MERC_ORIGENES.map((o) => {
+                const activo = origen === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => setOrigen(activo ? "" : o.value)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      activo
+                        ? "border-[#4FAEB2] bg-[#4FAEB2] text-white shadow-sm"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-[#4FAEB2]/60 hover:bg-[#4FAEB2]/5"
+                    }`}
+                  >
+                    <span aria-hidden>{o.icon}</span>
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <label className="mt-3 flex flex-col gap-1 text-xs text-slate-600">
             <span className="font-semibold text-slate-700">Notas (opcional)</span>
