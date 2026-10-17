@@ -851,7 +851,7 @@ export default function EditarSorteoPage() {
           </p>
         </section>
 
-        <ProcesarPendientesSorteoClient />
+        <ProcesarPendientesSorteoClient sorteoId={id} />
 
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
           <h2 className="text-sm font-semibold text-slate-800 border-b border-slate-100 pb-2">Datos bancarios</h2>

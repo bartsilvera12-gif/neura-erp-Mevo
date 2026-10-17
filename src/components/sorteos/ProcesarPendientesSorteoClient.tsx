@@ -25,11 +25,11 @@ type Acumulado = {
   fallidos: number;
 };
 
-async function postJson<T>(body: Record<string, unknown>): Promise<T> {
+async function postJson<T>(sorteoId: string, body: Record<string, unknown>): Promise<T> {
   const res = await fetchWithSupabaseSession(PROCESAR_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ sorteo_id: sorteoId, ...body }),
   });
   const raw = await res.text();
   let json: { success?: boolean; data?: T; error?: string };
@@ -44,7 +44,7 @@ async function postJson<T>(body: Record<string, unknown>): Promise<T> {
   return json.data;
 }
 
-export default function ProcesarPendientesSorteoClient() {
+export default function ProcesarPendientesSorteoClient({ sorteoId }: { sorteoId: string }) {
   const [buscando, setBuscando] = useState(false);
   const [procesando, setProcesando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +59,7 @@ export default function ProcesarPendientesSorteoClient() {
     setAcum(null);
     setBuscando(true);
     try {
-      const data = await postJson<DryRunData>({ dry_run: true });
+      const data = await postJson<DryRunData>(sorteoId, { dry_run: true });
       setTotalPendiente(data.total_pendientes);
       setRestante(data.total_pendientes);
     } catch (e) {
@@ -84,7 +84,7 @@ export default function ProcesarPendientesSorteoClient() {
       // Bucle por tandas hasta que no queden más o una tanda no avance.
       // Límite de seguridad de iteraciones para no quedar en bucle infinito.
       for (let i = 0; i < 1000; i++) {
-        const data = await postJson<ProcesarData>({ limit: CHUNK });
+        const data = await postJson<ProcesarData>(sorteoId, { limit: CHUNK });
         total.cerrados += data.cerrados;
         total.pendientes_datos += data.pendientes_datos;
         total.pendientes_confirmacion += data.pendientes_confirmacion;
