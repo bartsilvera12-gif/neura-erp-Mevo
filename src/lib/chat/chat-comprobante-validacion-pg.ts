@@ -1,10 +1,23 @@
 import type { Pool } from "pg";
 import {
+  MOTIVO_VALIDACION_ASESOR_PENDIENTE_DATOS,
+  MOTIVO_VALIDACION_ASESOR_PENDIENTE_CONFIRMACION_CLIENTE,
   SORTEO_COMPROBANTE_ESTADO_VALIDACION_FIELD,
   SORTEO_COMPROBANTE_MOTIVO_VALIDACION_FIELD,
   type ComprobanteValidacionListRow,
 } from "@/lib/chat/comprobante-validation-types";
 import { quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
+
+/**
+ * Motivos "pendientes" que deja la aprobación manual cuando el comprobante está OK
+ * pero el cliente todavía debe completar datos o confirmar en el chat. Esas filas
+ * NO deben volver a procesarse en lote: ya se les mandó el pedido por WhatsApp, y
+ * re-procesarlas spamearía a la persona con el mismo mensaje una y otra vez.
+ */
+export const MOTIVOS_PENDIENTES_NO_REPROCESAR = [
+  MOTIVO_VALIDACION_ASESOR_PENDIENTE_DATOS,
+  MOTIVO_VALIDACION_ASESOR_PENDIENTE_CONFIRMACION_CLIENTE,
+] as const;
 
 function isoPg(v: unknown): string {
   if (v == null) return "";
@@ -152,23 +165,25 @@ export async function pgFetchPendingSorteoComprobanteIds(
   const where = `cv.empresa_id = $1::uuid
       AND cv.sorteo_entrada_id IS NULL
       AND cv.estado_validacion IN ('valido', 'aprobado_manual')
+      AND (cv.motivo_validacion IS NULL OR cv.motivo_validacion NOT IN ($3, $4))
       AND EXISTS (
         SELECT 1 FROM ${ft} f
         WHERE f.empresa_id = cv.empresa_id
           AND btrim(f.flow_code) = btrim(cv.flow_code)
           AND f.sorteo_id = $2::uuid
       )`;
+  const [motivoDatos, motivoConfirm] = MOTIVOS_PENDIENTES_NO_REPROCESAR;
 
   const totalRes = await pool.query(
     `SELECT count(*)::int AS n FROM ${vt} cv WHERE ${where}`,
-    [empresaId, sorteoId]
+    [empresaId, sorteoId, motivoDatos, motivoConfirm]
   );
   const total = Number((totalRes.rows?.[0] as { n?: number } | undefined)?.n ?? 0) || 0;
 
   const lim = Math.max(1, Math.min(200, Math.trunc(limit) || 25));
   const idsRes = await pool.query(
-    `SELECT cv.id::text AS id FROM ${vt} cv WHERE ${where} ORDER BY cv.created_at ASC LIMIT $3`,
-    [empresaId, sorteoId, lim]
+    `SELECT cv.id::text AS id FROM ${vt} cv WHERE ${where} ORDER BY cv.created_at ASC LIMIT $5`,
+    [empresaId, sorteoId, motivoDatos, motivoConfirm, lim]
   );
   const ids = (idsRes.rows ?? []).map((r) => String((r as { id: string }).id));
   return { ids, total };
