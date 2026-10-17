@@ -7,6 +7,7 @@ import { getSorteoById, updateSorteo } from "@/lib/sorteos/actions";
 import type { SorteoCouponNumberMode, SorteoEstado, SorteoTicketDeliveryMode } from "@/lib/sorteos/types";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { normalizeTicketImageConfig } from "@/lib/sorteos/sorteo-ticket-types";
+import ProcesarPendientesSorteoClient from "@/components/sorteos/ProcesarPendientesSorteoClient";
 
 const SORTEO_TICKET_ASSETS_BUCKET = "sorteo-ticket-assets";
 const MAX_ASSET_BYTES = 4 * 1024 * 1024;
@@ -849,6 +850,8 @@ export default function EditarSorteoPage() {
             <strong>Tickets / Comprobantes</strong>.
           </p>
         </section>
+
+        <ProcesarPendientesSorteoClient />
 
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
           <h2 className="text-sm font-semibold text-slate-800 border-b border-slate-100 pb-2">Datos bancarios</h2>
