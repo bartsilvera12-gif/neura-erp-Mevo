@@ -8,7 +8,10 @@ import {
 } from "@/lib/supabase/empresa-data-schema";
 import { getChatPostgresPool } from "@/lib/supabase/chat-pg-pool";
 import { isLikelyUnexposedTenantChatSchema } from "@/lib/supabase/chat-data-schema";
-import { pgFetchPendingSorteoComprobanteIds } from "@/lib/chat/chat-comprobante-validacion-pg";
+import {
+  pgFetchPendingSorteoComprobanteIds,
+  MOTIVOS_PENDIENTES_NO_REPROCESAR,
+} from "@/lib/chat/chat-comprobante-validacion-pg";
 import { approveComprobanteAndCloseSorteoPurchase } from "@/lib/chat/sorteo-manual-approval-service";
 import type { AppSupabaseClient } from "@/lib/supabase/schema";
 
@@ -69,6 +72,7 @@ async function countAndListPending(
   const sb = await createServiceRoleClientForEmpresa(empresaId);
   const flowCodes = await flowCodesForSorteo(sb, empresaId, sorteoId);
   if (flowCodes.length === 0) return { ids: [], total: 0 };
+  const [motivoDatos, motivoConfirm] = MOTIVOS_PENDIENTES_NO_REPROCESAR;
   const { data, error, count } = await sb
     .from("chat_comprobante_validaciones")
     .select("id", { count: "exact" })
@@ -76,6 +80,7 @@ async function countAndListPending(
     .is("sorteo_entrada_id", null)
     .in("estado_validacion", ["valido", "aprobado_manual"])
     .in("flow_code", flowCodes)
+    .or(`motivo_validacion.is.null,motivo_validacion.not.in.("${motivoDatos}","${motivoConfirm}")`)
     .order("created_at", { ascending: true })
     .limit(Math.max(1, Math.min(200, Math.trunc(limit) || 25)));
   if (error) throw new Error(error.message);

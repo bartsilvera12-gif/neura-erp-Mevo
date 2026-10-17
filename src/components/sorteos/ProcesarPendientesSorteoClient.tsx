@@ -83,6 +83,7 @@ export default function ProcesarPendientesSorteoClient({ sorteoId }: { sorteoId:
     try {
       // Bucle por tandas hasta que no queden más o una tanda no avance.
       // Límite de seguridad de iteraciones para no quedar en bucle infinito.
+      let prevRestante = Infinity;
       for (let i = 0; i < 1000; i++) {
         const data = await postJson<ProcesarData>(sorteoId, { limit: CHUNK });
         total.cerrados += data.cerrados;
@@ -94,8 +95,11 @@ export default function ProcesarPendientesSorteoClient({ sorteoId }: { sorteoId:
         if (data.errores.length > 0 && !error) {
           setError(`Algunos no se pudieron cerrar. Ej.: ${data.errores[0]?.message ?? ""}`);
         }
-        // Cortamos si ya no quedan, o si esta tanda no procesó nada (evita bucle).
+        // Cortamos si ya no quedan, si no procesó nada, o si la tanda no hizo
+        // progreso (el restante no bajó): evita re-procesar en bucle lo mismo.
         if (data.total_restante <= 0 || data.procesados === 0) break;
+        if (data.total_restante >= prevRestante) break;
+        prevRestante = data.total_restante;
       }
       setListo(true);
     } catch (e) {
