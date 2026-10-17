@@ -126,6 +126,41 @@ export async function pgFetchComprobanteValidacionesForConversation(
   return trySelect(COLS_MIN);
 }
 
+/**
+ * IDs de comprobantes que ya están aprobados/válidos pero todavía NO generaron
+ * entrada de sorteo (compra sin cerrar). Es el caso típico de la gente que
+ * quedó "sin número" porque al momento del cierre no había boletas disponibles:
+ * el comprobante quedó `valido`/`aprobado_manual` con `sorteo_entrada_id` nulo.
+ *
+ * Se excluyen a propósito los estados en revisión/rechazo (duplicados, monto
+ * incoherente, revisión manual, rechazado), porque esos necesitan ojo humano y
+ * no deben cerrarse en lote.
+ */
+export async function pgFetchPendingSorteoComprobanteIds(
+  pool: Pool,
+  schema: string,
+  empresaId: string,
+  limit: number
+): Promise<{ ids: string[]; total: number }> {
+  const vt = quoteSchemaTable(schema, "chat_comprobante_validaciones");
+  const where = `empresa_id = $1::uuid
+      AND sorteo_entrada_id IS NULL
+      AND estado_validacion IN ('valido', 'aprobado_manual')`;
+
+  const totalRes = await pool.query(`SELECT count(*)::int AS n FROM ${vt} WHERE ${where}`, [
+    empresaId,
+  ]);
+  const total = Number((totalRes.rows?.[0] as { n?: number } | undefined)?.n ?? 0) || 0;
+
+  const lim = Math.max(1, Math.min(200, Math.trunc(limit) || 25));
+  const idsRes = await pool.query(
+    `SELECT id::text AS id FROM ${vt} WHERE ${where} ORDER BY created_at ASC LIMIT $2`,
+    [empresaId, lim]
+  );
+  const ids = (idsRes.rows ?? []).map((r) => String((r as { id: string }).id));
+  return { ids, total };
+}
+
 type ValidacionApproveRow = {
   id: string;
   conversation_id: string;
