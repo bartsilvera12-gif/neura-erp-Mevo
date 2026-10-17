@@ -132,6 +132,10 @@ export async function pgFetchComprobanteValidacionesForConversation(
  * quedó "sin número" porque al momento del cierre no había boletas disponibles:
  * el comprobante quedó `valido`/`aprobado_manual` con `sorteo_entrada_id` nulo.
  *
+ * Se acota SIEMPRE a un sorteo concreto vía `chat_flows.sorteo_id` (el flujo del
+ * que salió el comprobante). Así nunca se tocan comprobantes de otros sorteos
+ * (p. ej. finalizados), que ni siquiera deben recibir un WhatsApp de reenvío.
+ *
  * Se excluyen a propósito los estados en revisión/rechazo (duplicados, monto
  * incoherente, revisión manual, rechazado), porque esos necesitan ojo humano y
  * no deben cerrarse en lote.
@@ -140,22 +144,31 @@ export async function pgFetchPendingSorteoComprobanteIds(
   pool: Pool,
   schema: string,
   empresaId: string,
+  sorteoId: string,
   limit: number
 ): Promise<{ ids: string[]; total: number }> {
   const vt = quoteSchemaTable(schema, "chat_comprobante_validaciones");
-  const where = `empresa_id = $1::uuid
-      AND sorteo_entrada_id IS NULL
-      AND estado_validacion IN ('valido', 'aprobado_manual')`;
+  const ft = quoteSchemaTable(schema, "chat_flows");
+  const where = `cv.empresa_id = $1::uuid
+      AND cv.sorteo_entrada_id IS NULL
+      AND cv.estado_validacion IN ('valido', 'aprobado_manual')
+      AND EXISTS (
+        SELECT 1 FROM ${ft} f
+        WHERE f.empresa_id = cv.empresa_id
+          AND btrim(f.flow_code) = btrim(cv.flow_code)
+          AND f.sorteo_id = $2::uuid
+      )`;
 
-  const totalRes = await pool.query(`SELECT count(*)::int AS n FROM ${vt} WHERE ${where}`, [
-    empresaId,
-  ]);
+  const totalRes = await pool.query(
+    `SELECT count(*)::int AS n FROM ${vt} cv WHERE ${where}`,
+    [empresaId, sorteoId]
+  );
   const total = Number((totalRes.rows?.[0] as { n?: number } | undefined)?.n ?? 0) || 0;
 
   const lim = Math.max(1, Math.min(200, Math.trunc(limit) || 25));
   const idsRes = await pool.query(
-    `SELECT id::text AS id FROM ${vt} WHERE ${where} ORDER BY created_at ASC LIMIT $2`,
-    [empresaId, lim]
+    `SELECT cv.id::text AS id FROM ${vt} cv WHERE ${where} ORDER BY cv.created_at ASC LIMIT $3`,
+    [empresaId, sorteoId, lim]
   );
   const ids = (idsRes.rows ?? []).map((r) => String((r as { id: string }).id));
   return { ids, total };

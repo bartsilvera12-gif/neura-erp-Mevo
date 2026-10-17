@@ -24,28 +24,58 @@ import type { AppSupabaseClient } from "@/lib/supabase/schema";
  * WhatsApp. No fuerza nada: si faltan datos o el flujo exige confirmación del cliente,
  * el caso queda pendiente igual que con el botón de a uno.
  *
- * body: { dry_run?: boolean; limit?: number }
+ * body: { sorteo_id: string; dry_run?: boolean; limit?: number }
+ *  - sorteo_id: obligatorio. Solo se tocan comprobantes de ESE sorteo (vía
+ *    chat_flows.sorteo_id); nunca de otros sorteos (p. ej. finalizados).
  *  - dry_run: solo cuenta cuántas compras pendientes hay (no procesa).
  *  - limit: cuántas procesar en esta llamada (tope por timeout). Default 15.
  */
-type Body = { dry_run?: boolean; limit?: number };
+type Body = { sorteo_id?: string; dry_run?: boolean; limit?: number };
+
+function isUuid(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s.trim());
+}
+
+/** flow_codes vinculados a un sorteo (chat_flows.sorteo_id). Para el camino PostgREST. */
+async function flowCodesForSorteo(
+  sb: Awaited<ReturnType<typeof createServiceRoleClientForEmpresa>>,
+  empresaId: string,
+  sorteoId: string
+): Promise<string[]> {
+  const { data, error } = await sb
+    .from("chat_flows")
+    .select("flow_code")
+    .eq("empresa_id", empresaId)
+    .eq("sorteo_id", sorteoId);
+  if (error) throw new Error(error.message);
+  const set = new Set<string>();
+  for (const r of data ?? []) {
+    const fc = String((r as { flow_code?: string }).flow_code ?? "").trim();
+    if (fc) set.add(fc);
+  }
+  return [...set];
+}
 
 async function countAndListPending(
   empresaId: string,
   schema: string,
+  sorteoId: string,
   limit: number
 ): Promise<{ ids: string[]; total: number }> {
   const pool = getChatPostgresPool();
   if (pool && isLikelyUnexposedTenantChatSchema(schema)) {
-    return pgFetchPendingSorteoComprobanteIds(pool, schema, empresaId, limit);
+    return pgFetchPendingSorteoComprobanteIds(pool, schema, empresaId, sorteoId, limit);
   }
   const sb = await createServiceRoleClientForEmpresa(empresaId);
+  const flowCodes = await flowCodesForSorteo(sb, empresaId, sorteoId);
+  if (flowCodes.length === 0) return { ids: [], total: 0 };
   const { data, error, count } = await sb
     .from("chat_comprobante_validaciones")
     .select("id", { count: "exact" })
     .eq("empresa_id", empresaId)
     .is("sorteo_entrada_id", null)
     .in("estado_validacion", ["valido", "aprobado_manual"])
+    .in("flow_code", flowCodes)
     .order("created_at", { ascending: true })
     .limit(Math.max(1, Math.min(200, Math.trunc(limit) || 25)));
   if (error) throw new Error(error.message);
@@ -72,10 +102,17 @@ export async function POST(request: NextRequest) {
     const schema = await fetchDataSchemaForEmpresaId(empresaId);
 
     const body = (await request.json().catch(() => ({}))) as Body;
+    const sorteoId = typeof body.sorteo_id === "string" ? body.sorteo_id.trim() : "";
+    if (!sorteoId || !isUuid(sorteoId)) {
+      return NextResponse.json(
+        errorResponse("Falta el sorteo (sorteo_id) o es inválido."),
+        { status: 400 }
+      );
+    }
     const dryRun = body.dry_run === true;
     const limit = Math.max(1, Math.min(50, Number(body.limit) || 15));
 
-    const candidate = await countAndListPending(empresaId, schema, limit);
+    const candidate = await countAndListPending(empresaId, schema, sorteoId, limit);
 
     if (dryRun) {
       return NextResponse.json(successResponse({ total_pendientes: candidate.total }));
@@ -123,7 +160,7 @@ export async function POST(request: NextRequest) {
     /** Recuento fresco para que el cliente sepa cuántas quedan todavía. */
     let totalRestante = candidate.total;
     try {
-      const after = await countAndListPending(empresaId, schema, 1);
+      const after = await countAndListPending(empresaId, schema, sorteoId, 1);
       totalRestante = after.total;
     } catch {
       totalRestante = Math.max(0, candidate.total - cerrados);
