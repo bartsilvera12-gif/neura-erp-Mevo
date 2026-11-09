@@ -111,6 +111,8 @@ function formatFechaDisplay(d: Date): string {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      // Hora de Paraguay aunque se arme en el servidor (UTC).
+      timeZone: "America/Asuncion",
     });
   } catch {
     return d.toISOString().slice(0, 16);
