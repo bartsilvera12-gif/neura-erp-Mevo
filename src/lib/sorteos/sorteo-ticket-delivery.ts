@@ -401,9 +401,11 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
       }
     }
 
+    // El servidor corre en UTC: sin la zona, la boleta salía con 3 horas de más.
     const fechaHora = new Date().toLocaleString("es-PY", {
       dateStyle: "short",
       timeStyle: "short",
+      timeZone: "America/Asuncion",
     });
 
     const renderInput: SorteoTicketRenderInput = {
