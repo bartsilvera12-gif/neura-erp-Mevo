@@ -23,25 +23,45 @@ function fmtGs(v: number | null | undefined) {
   return `${(Number(v) || 0).toLocaleString("es-PY")} ₲`;
 }
 
-export default async function MercaderiaDashboardPage() {
+type Sp = { desde?: string; hasta?: string };
+const isYmd = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+function addDays(f: string, n: number) {
+  const d = new Date(`${f}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+export default async function MercaderiaDashboardPage({
+  searchParams,
+}: {
+  searchParams?: Sp | Promise<Sp>;
+}) {
   const role = await getMercRole();
   if (role.mode === "vendedor") redirect("/mercaderia/mi-stock");
   if (role.mode === "none") redirect("/");
+  const sp = await Promise.resolve(searchParams ?? {});
   const hoy = today();
-  const inicioSemana = daysAgo(6); // últimos 7 días
   const inicioMes = daysAgo(29); // últimos 30 días
+
+  let rDesde = isYmd(sp.desde) ? sp.desde! : daysAgo(6);
+  let rHasta = isYmd(sp.hasta) ? sp.hasta! : hoy;
+  if (rDesde > rHasta) [rDesde, rHasta] = [rHasta, rDesde];
+  if (addDays(rDesde, 365) < rHasta) rDesde = addDays(rHasta, -365); // tope 1 año
+  const inicioSemana = rDesde;
+  const nDias = Math.round((Date.parse(`${rHasta}T12:00:00Z`) - Date.parse(`${rDesde}T12:00:00Z`)) / 86400000) + 1;
+  const personalizado = isYmd(sp.desde) || isYmd(sp.hasta);
 
   const [kpisHoy, kpisSemana, kpisMes, vendedores, ventasRecientes, ventasDia] = await Promise.all([
     getKpisPorVendedor(hoy, hoy),
-    getKpisPorVendedor(inicioSemana, hoy),
+    getKpisPorVendedor(rDesde, rHasta),
     getKpisPorVendedor(inicioMes, hoy),
     listVendedores(true),
     listVentas({ limit: 15 }),
-    getVentasPorDia(inicioSemana, hoy),
+    getVentasPorDia(rDesde, rHasta),
   ]);
 
-  // Últimos 7 días completos (incluye días sin ventas)
-  const dias = Array.from({ length: 7 }, (_, i) => daysAgo(6 - i)).map((f) => {
+  // Todos los días del rango (incluye días sin ventas)
+  const dias = Array.from({ length: nDias }, (_, i) => addDays(inicioSemana, i)).map((f) => {
     const r = ventasDia.find((x) => x.fecha === f);
     return {
       fecha: f,
@@ -63,15 +83,33 @@ export default async function MercaderiaDashboardPage() {
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-3">
         <KpiCard label="Ventas hoy" boletas={totalHoy.ventas} monto={totalHoy.monto} utilidad={totalHoy.utilidad} />
-        <KpiCard label="Últimos 7 días" boletas={totalSem.ventas} monto={totalSem.monto} utilidad={totalSem.utilidad} />
+        <KpiCard label={personalizado ? `Del ${rDesde} al ${rHasta}` : "Últimos 7 días"} boletas={totalSem.ventas} monto={totalSem.monto} utilidad={totalSem.utilidad} />
         <KpiCard label="Últimos 30 días" boletas={totalMes.ventas} monto={totalMes.monto} utilidad={totalMes.utilidad} />
       </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <header className="border-b border-slate-100 px-5 py-3">
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-            Ventas y utilidades por día (últimos 7 días)
+            Ventas y utilidades por día ({personalizado ? `del ${rDesde} al ${rHasta}` : "últimos 7 días"})
           </h2>
+          <form method="get" className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="text-xs text-slate-600">
+              <span className="mb-1 block">Desde</span>
+              <input type="date" name="desde" defaultValue={rDesde} max={hoy} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="text-xs text-slate-600">
+              <span className="mb-1 block">Hasta</span>
+              <input type="date" name="hasta" defaultValue={rHasta} max={hoy} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+            </label>
+            <button type="submit" className="rounded-lg bg-[#4FAEB2] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90">
+              Filtrar
+            </button>
+            {personalizado ? (
+              <Link href="/mercaderia" className="py-1.5 text-xs text-[#4FAEB2] hover:underline">
+                Últimos 7 días
+              </Link>
+            ) : null}
+          </form>
         </header>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -99,7 +137,7 @@ export default async function MercaderiaDashboardPage() {
                 </tr>
               ))}
               <tr className="bg-slate-50 font-semibold">
-                <td className="px-5 py-2">Total semana</td>
+                <td className="px-5 py-2">{personalizado ? "Total del período" : "Total semana"}</td>
                 <td />
                 <td className="px-5 py-2 text-right tabular-nums">{totalSem.ventas}</td>
                 <td className="px-5 py-2 text-right tabular-nums">{fmtGs(totalSem.monto)}</td>
