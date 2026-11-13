@@ -460,6 +460,46 @@ export async function getKpisPorVendedor(desde: string, hasta: string): Promise<
   }
 }
 
+export type MercKpiDiaRow = {
+  fecha: string;
+  ventas_cantidad: number;
+  monto_total: number;
+  utilidad_total: number;
+};
+
+/** Ventas (no anuladas) agrupadas por día en el rango. */
+export async function getVentasPorDia(desde: string, hasta: string): Promise<MercKpiDiaRow[]> {
+  const c = await ctx();
+  if (!c) return [];
+  try {
+    const pool = requirePool();
+    const schema = assertAllowedChatDataSchema(c.schema);
+    const tV = quoteSchemaTable(schema, "merc_ventas");
+    const r = await pool.query(
+      `select to_char(v.fecha, 'YYYY-MM-DD') as fecha,
+              count(v.id)::int as ventas_cantidad,
+              coalesce(sum(v.monto_total_real), 0) as monto_total,
+              coalesce(sum(v.utilidad_snapshot), 0) as utilidad_total
+         from ${tV} v
+        where v.empresa_id = $1::uuid
+          and v.anulada = false
+          and v.fecha >= $2::date and v.fecha <= $3::date
+        group by v.fecha
+        order by v.fecha asc`,
+      [c.empresa_id, desde, hasta]
+    );
+    return r.rows.map((row) => ({
+      fecha: String(row.fecha),
+      ventas_cantidad: num(row.ventas_cantidad),
+      monto_total: num(row.monto_total),
+      utilidad_total: num(row.utilidad_total),
+    }));
+  } catch (e) {
+    logErr("getVentasPorDia", e, { desde, hasta, schema: c.schema });
+    return [];
+  }
+}
+
 export type ComisionesMercVendedorResult = {
   /** Detalle de ventas (no anuladas) del vendedor en el período. */
   rows: MercVenta[];

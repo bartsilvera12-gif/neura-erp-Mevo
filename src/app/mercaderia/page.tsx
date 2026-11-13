@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   getKpisPorVendedor,
+  getVentasPorDia,
   listVentas,
   listVendedores,
 } from "@/lib/mercaderia/server-queries";
@@ -30,13 +31,26 @@ export default async function MercaderiaDashboardPage() {
   const inicioSemana = daysAgo(6); // últimos 7 días
   const inicioMes = daysAgo(29); // últimos 30 días
 
-  const [kpisHoy, kpisSemana, kpisMes, vendedores, ventasRecientes] = await Promise.all([
+  const [kpisHoy, kpisSemana, kpisMes, vendedores, ventasRecientes, ventasDia] = await Promise.all([
     getKpisPorVendedor(hoy, hoy),
     getKpisPorVendedor(inicioSemana, hoy),
     getKpisPorVendedor(inicioMes, hoy),
     listVendedores(true),
     listVentas({ limit: 15 }),
+    getVentasPorDia(inicioSemana, hoy),
   ]);
+
+  // Últimos 7 días completos (incluye días sin ventas)
+  const dias = Array.from({ length: 7 }, (_, i) => daysAgo(6 - i)).map((f) => {
+    const r = ventasDia.find((x) => x.fecha === f);
+    return {
+      fecha: f,
+      ventas: r?.ventas_cantidad ?? 0,
+      monto: r?.monto_total ?? 0,
+      utilidad: r?.utilidad_total ?? 0,
+    };
+  });
+  const maxMonto = Math.max(1, ...dias.map((d) => d.monto));
 
   const sum = (rows: Awaited<ReturnType<typeof getKpisPorVendedor>>, k: keyof (typeof rows)[number]) =>
     rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
@@ -52,6 +66,49 @@ export default async function MercaderiaDashboardPage() {
         <KpiCard label="Últimos 7 días" boletas={totalSem.ventas} monto={totalSem.monto} utilidad={totalSem.utilidad} />
         <KpiCard label="Últimos 30 días" boletas={totalMes.ventas} monto={totalMes.monto} utilidad={totalMes.utilidad} />
       </div>
+
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <header className="border-b border-slate-100 px-5 py-3">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+            Ventas y utilidades por día (últimos 7 días)
+          </h2>
+        </header>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 text-[10px] uppercase tracking-[0.1em] text-slate-500">
+                <th className="px-5 py-2 text-left">Día</th>
+                <th className="px-5 py-2 text-left w-1/3"> </th>
+                <th className="px-5 py-2 text-right">Ventas</th>
+                <th className="px-5 py-2 text-right">Monto</th>
+                <th className="px-5 py-2 text-right">Utilidad</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {dias.map((d) => (
+                <tr key={d.fecha} className="hover:bg-slate-50/70">
+                  <td className="px-5 py-2 text-slate-700">{d.fecha}</td>
+                  <td className="px-5 py-2">
+                    <div className="h-2 rounded-full bg-slate-100">
+                      <div className="h-2 rounded-full bg-[#4FAEB2]" style={{ width: `${(d.monto / maxMonto) * 100}%` }} />
+                    </div>
+                  </td>
+                  <td className="px-5 py-2 text-right tabular-nums">{d.ventas}</td>
+                  <td className="px-5 py-2 text-right tabular-nums">{fmtGs(d.monto)}</td>
+                  <td className="px-5 py-2 text-right tabular-nums font-semibold text-[#4FAEB2]">{fmtGs(d.utilidad)}</td>
+                </tr>
+              ))}
+              <tr className="bg-slate-50 font-semibold">
+                <td className="px-5 py-2">Total semana</td>
+                <td />
+                <td className="px-5 py-2 text-right tabular-nums">{totalSem.ventas}</td>
+                <td className="px-5 py-2 text-right tabular-nums">{fmtGs(totalSem.monto)}</td>
+                <td className="px-5 py-2 text-right tabular-nums text-[#4FAEB2]">{fmtGs(totalSem.utilidad)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <header className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
