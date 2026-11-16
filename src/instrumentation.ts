@@ -4,7 +4,9 @@
  *
  * Uso: arrancar el pump de campañas (envío por lotes del lado servidor) para que
  * las campañas en `sending` se completen sin depender de una pestaña del navegador
- * abierta. Ver src/lib/campaigns/campaign-pump.ts.
+ * abierta. Ver src/lib/campaigns/campaign-pump.ts. También arranca el pump de
+ * automatizaciones (cierre de sorteos por fecha y seguimiento por audio), ver
+ * src/lib/chat/automation-pump.ts.
  */
 export async function register(): Promise<void> {
   // Sólo en el runtime Node (no en edge) y una vez por proceso.
@@ -18,4 +20,8 @@ export async function register(): Promise<void> {
     return;
   }
   startCampaignPump();
+
+  // Mismo criterio de entorno: cierre de sorteos por fecha + seguimiento por audio (rkt), cada minuto.
+  const { startAutomationPump } = await import("@/lib/chat/automation-pump");
+  startAutomationPump();
 }

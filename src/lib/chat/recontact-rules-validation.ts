@@ -31,7 +31,9 @@ export type RecontactScheduleConfig = {
 };
 
 export type RecontactMessageConfig = {
-  message_type?: "session_text" | "whatsapp_template";
+  message_type?: "session_text" | "whatsapp_template" | "session_audio";
+  /** session_audio: un audio por intento (https), en orden. */
+  audio_urls?: string[];
   session_text?: string | null;
   template_name?: string | null;
   template_language?: string | null;
@@ -270,6 +272,14 @@ function normalizeMessage(raw: unknown, validNodeCodes?: Set<string>): Record<st
   if (raw === undefined || raw === null) return base;
   if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("message_config inválido");
   const o = raw as Record<string, unknown>;
+  if (o.message_type === "session_audio") {
+    const urls = Array.isArray(o.audio_urls)
+      ? o.audio_urls.map((u) => String(u ?? "").trim()).filter((u) => /^https:\/\//i.test(u))
+      : [];
+    if (urls.length === 0) throw new Error("Cargá al menos un enlace https de audio (uno por intento).");
+    if (urls.length > 5) throw new Error("Máximo 5 audios por regla.");
+    return { message_type: "session_audio", audio_urls: urls, buttons_json: [] };
+  }
   const mt = o.message_type === "whatsapp_template" ? "whatsapp_template" : "session_text";
   base.message_type = mt;
   const buttonsSrc = o.buttons_json;

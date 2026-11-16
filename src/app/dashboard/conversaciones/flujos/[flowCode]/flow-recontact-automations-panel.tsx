@@ -166,7 +166,9 @@ type Draft = {
   skip_human: boolean;
   skip_closed: boolean;
   purchase_condition: PurchaseCondition;
-  message_type: "session_text" | "whatsapp_template";
+  message_type: "session_text" | "whatsapp_template" | "session_audio";
+  /** session_audio: un enlace por línea, en el orden de los intentos. */
+  audio_urls_text: string;
   session_text: string;
   template_name: string;
   template_language: string;
@@ -193,6 +195,7 @@ function emptyDraft(): Draft {
     skip_closed: true,
     purchase_condition: "none",
     message_type: "session_text",
+    audio_urls_text: "",
     session_text: "",
     template_name: "",
     template_language: "",
@@ -213,7 +216,12 @@ function rowToDraft(row: RecontactRuleRowOut): Draft {
     row.message_config && typeof row.message_config === "object" && !Array.isArray(row.message_config)
       ? (row.message_config as Record<string, unknown>)
       : {};
-  const mt = mc.message_type === "whatsapp_template" ? "whatsapp_template" : "session_text";
+  const mt =
+    mc.message_type === "session_audio"
+      ? "session_audio"
+      : mc.message_type === "whatsapp_template"
+        ? "whatsapp_template"
+        : "session_text";
   let template_components_json = "{}";
   try {
     template_components_json = JSON.stringify(mc.template_components ?? {}, null, 2);
@@ -242,6 +250,7 @@ function rowToDraft(row: RecontactRuleRowOut): Draft {
     skip_closed: g.skip_if_conversation_closed,
     purchase_condition: g.purchase_condition,
     message_type: mt,
+    audio_urls_text: Array.isArray(mc.audio_urls) ? (mc.audio_urls as unknown[]).map(String).join("\n") : "",
     session_text: typeof mc.session_text === "string" ? mc.session_text : "",
     template_name: typeof mc.template_name === "string" ? mc.template_name : "",
     template_language: typeof mc.template_language === "string" ? mc.template_language : "",
@@ -259,7 +268,15 @@ function draftToPayload(d: Draft): Record<string, unknown> {
   }
   const buttonsParsed = buttonsToPayloadJson(d.message_buttons);
   const message_config =
-    d.message_type === "session_text"
+    d.message_type === "session_audio"
+      ? {
+          message_type: "session_audio",
+          audio_urls: d.audio_urls_text
+            .split(/\r?\n/)
+            .map((u) => u.trim())
+            .filter(Boolean),
+        }
+      : d.message_type === "session_text"
       ? {
           message_type: "session_text",
           session_text: d.session_text,
@@ -529,7 +546,12 @@ export function FlowRecontactAutomationsPanel(props: {
 
   const msgLabel = (row: RecontactRuleRowOut) => {
     const mc = row.message_config as Record<string, unknown> | null | undefined;
-    const t = mc?.message_type === "whatsapp_template" ? "Plantilla WhatsApp" : "Texto de sesión";
+    const t =
+      mc?.message_type === "session_audio"
+        ? "Audio (se envía)"
+        : mc?.message_type === "whatsapp_template"
+          ? "Plantilla WhatsApp"
+          : "Texto de sesión";
     return t;
   };
 
@@ -855,14 +877,28 @@ export function FlowRecontactAutomationsPanel(props: {
                 onChange={(e) =>
                   setDraft((d) => ({
                     ...d,
-                    message_type: e.target.value as "session_text" | "whatsapp_template",
+                    message_type: e.target.value as "session_text" | "whatsapp_template" | "session_audio",
                   }))
                 }
               >
                 <option value="session_text">Texto de sesión</option>
                 <option value="whatsapp_template">Plantilla WhatsApp</option>
+                <option value="session_audio">Audio de WhatsApp (se envía automáticamente)</option>
               </select>
-              {draft.message_type === "session_text" ? (
+              {draft.message_type === "session_audio" ? (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                    Con la regla activa, este audio SÍ se envía: intento 1 a los minutos de inactividad; cada intento
+                    siguiente, pasado el intervalo. Un enlace por línea, en orden. Si el cliente escribe, se corta.
+                  </p>
+                  <textarea
+                    className="w-full min-h-[72px] font-mono text-xs border border-slate-200 rounded-lg px-2 py-1"
+                    placeholder="https://… (audio del intento 1)"
+                    value={draft.audio_urls_text}
+                    onChange={(e) => setDraft((d) => ({ ...d, audio_urls_text: e.target.value }))}
+                  />
+                </div>
+              ) : draft.message_type === "session_text" ? (
                 <textarea
                   className="w-full min-h-[88px] border border-slate-200 rounded-lg px-3 py-2 text-sm"
                   placeholder="Texto que se usará en una fase futura como mensaje de sesión."
