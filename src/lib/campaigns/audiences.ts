@@ -24,17 +24,19 @@ export const PERIOD_PRESETS = ["hoy", "ayer", "ultimos_7", "ultimos_30", "sorteo
 export type PeriodPreset = (typeof PERIOD_PRESETS)[number];
 
 export type AudienceFilters = {
-  kind: AudienceKind;
+  /** Uno o más tipos: la audiencia es la suma (sin repetir personas). */
+  kinds: AudienceKind[];
   period: PeriodPreset;
   desde?: string | null;
   hasta?: string | null;
-  sorteoId?: string | null;
+  /** Uno o más sorteos (vacío = sin filtro de sorteo). */
+  sorteoIds: string[];
   campaignId?: string | null;
   excluirPendientes?: boolean;
   excluirTelefonos?: string[];
   agregarTelefonos?: string[];
-  /** Solo `compraron_otro_sorteo`: sorteo donde SÍ compraron (el de `sorteoId` es donde NO). */
-  sorteoAnteriorId?: string | null;
+  /** Solo `compraron_otro_sorteo`: sorteos donde SÍ compraron (los de `sorteoIds` son donde NO). */
+  sorteoAnteriorIds: string[];
   /** Rango de boletas compradas (suma por persona). Aplica a los tipos basados en compras. */
   boletasMin?: number | null;
   boletasMax?: number | null;
@@ -44,6 +46,9 @@ export type AudienceFilters = {
 
 /** Tipos de audiencia que se calculan a partir de compras y aceptan el filtro de boletas. */
 export const KINDS_CON_BOLETAS: readonly AudienceKind[] = ["compraron", "comprobante_pendiente", "compraron_otro_sorteo"];
+
+/** Tipos que no miran el período (comparan sorteos completos). */
+const KINDS_SIN_PERIODO: readonly AudienceKind[] = ["compraron_otro_sorteo"];
 
 export type AudienceRow = { telefono: string; nombre: string; ultimo: string | null; detalle: string | null };
 
@@ -65,17 +70,21 @@ export function normalizeNat(raw: string): string {
 
 export function parseAudienceFilters(body: Record<string, unknown>): AudienceFilters {
   const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  /** Acepta lista (`kinds`, `sorteo_ids`…) y también el campo suelto viejo (`kind`, `sorteo_id`…). */
+  const list = (many: unknown, one: unknown): string[] => [
+    ...new Set([...(Array.isArray(many) ? many : []), one].map(s).filter(Boolean)),
+  ];
   return {
-    kind: s(body.kind) as AudienceKind,
+    kinds: list(body.kinds, body.kind) as AudienceKind[],
     period: s(body.period) as PeriodPreset,
     desde: s(body.desde) || null,
     hasta: s(body.hasta) || null,
-    sorteoId: s(body.sorteo_id) || null,
+    sorteoIds: list(body.sorteo_ids, body.sorteo_id),
     campaignId: s(body.campaign_id) || null,
     excluirPendientes: body.excluir_pendientes !== false,
     excluirTelefonos: phoneList(body.excluir_telefonos),
     agregarTelefonos: phoneList(body.agregar_telefonos),
-    sorteoAnteriorId: s(body.sorteo_anterior_id) || null,
+    sorteoAnteriorIds: list(body.sorteo_anterior_ids, body.sorteo_anterior_id),
     boletasMin: intOrNull(body.boletas_min),
     boletasMax: intOrNull(body.boletas_max),
     excluirCampanaHoras: intOrNull(body.excluir_campana_horas),
@@ -102,17 +111,22 @@ function phoneList(v: unknown): string[] {
 }
 
 export function validateAudienceFilters(f: AudienceFilters): string | null {
-  if (!AUDIENCE_KINDS.includes(f.kind)) return "Elegí qué personas querés.";
-  if (!PERIOD_PRESETS.includes(f.period)) return "Elegí un período.";
-  if (f.period === "personalizado" && (!isDate(f.desde) || !isDate(f.hasta))) return "Completá las fechas desde y hasta.";
-  if (f.period === "personalizado" && f.desde! > f.hasta!) return "La fecha desde no puede ser posterior a la fecha hasta.";
-  if (f.period === "sorteo_actual" && !isUuid(f.sorteoId)) return "Elegí el sorteo.";
-  if ((f.kind === "tocaron_boton" || f.kind === "respondieron_campana") && !isUuid(f.campaignId)) return "Elegí la campaña.";
-  if (f.sorteoId && !isUuid(f.sorteoId)) return "Sorteo inválido.";
-  if (f.kind === "compraron_otro_sorteo") {
-    if (!isUuid(f.sorteoAnteriorId)) return "Elegí el sorteo donde compraron.";
-    if (!isUuid(f.sorteoId)) return "Elegí el sorteo donde todavía no compraron.";
-    if (f.sorteoAnteriorId === f.sorteoId) return "Los dos sorteos tienen que ser distintos.";
+  if (f.kinds.length === 0 || !f.kinds.every((k) => AUDIENCE_KINDS.includes(k))) return "Elegí qué personas querés.";
+  const usaPeriodo = f.kinds.some((k) => !KINDS_SIN_PERIODO.includes(k));
+  if (usaPeriodo) {
+    if (!PERIOD_PRESETS.includes(f.period)) return "Elegí un período.";
+    if (f.period === "personalizado" && (!isDate(f.desde) || !isDate(f.hasta))) return "Completá las fechas desde y hasta.";
+    if (f.period === "personalizado" && f.desde! > f.hasta!) return "La fecha desde no puede ser posterior a la fecha hasta.";
+    if (f.period === "sorteo_actual" && f.sorteoIds.length === 0) return "Elegí al menos un sorteo.";
+  }
+  if (f.kinds.some((k) => k === "tocaron_boton" || k === "respondieron_campana") && !isUuid(f.campaignId))
+    return "Elegí la campaña.";
+  if (!f.sorteoIds.every(isUuid) || !f.sorteoAnteriorIds.every(isUuid)) return "Sorteo inválido.";
+  if (f.kinds.includes("compraron_otro_sorteo")) {
+    if (f.sorteoAnteriorIds.length === 0) return "Elegí al menos un sorteo donde compraron.";
+    if (f.sorteoIds.length === 0) return "Elegí al menos un sorteo donde todavía no compraron.";
+    if (f.sorteoAnteriorIds.some((id) => f.sorteoIds.includes(id)))
+      return "Un mismo sorteo no puede estar en \"compraron en\" y en \"todavía no compraron en\".";
   }
   if (Number.isNaN(f.boletasMin) || Number.isNaN(f.boletasMax)) return "Las boletas tienen que ser un número entero.";
   if (f.boletasMin != null && f.boletasMax != null && f.boletasMin > f.boletasMax)
@@ -149,7 +163,8 @@ function buildQuery(schema: string, empresaId: string, f: AudienceFilters, limit
       desde = `(${dayStart} - interval '29 days')`;
       break;
     case "sorteo_actual":
-      desde = `(SELECT created_at FROM ${t("sorteos")} WHERE id = ${p(f.sorteoId)}::uuid)`;
+      // Con varios sorteos: desde que empezó el más viejo de los elegidos.
+      desde = `(SELECT MIN(created_at) FROM ${t("sorteos")} WHERE id = ANY(${p(f.sorteoIds)}::uuid[]))`;
       break;
     case "personalizado":
       desde = `(${p(f.desde)}::date::timestamp AT TIME ZONE '${TZ}')`;
@@ -161,7 +176,8 @@ function buildQuery(schema: string, empresaId: string, f: AudienceFilters, limit
    * Se arma recién al usarse: un parámetro que se agrega y no aparece en el SQL hace fallar la consulta
    * ("could not determine data type of parameter"), por ejemplo en tipos que no miran compras.
    */
-  const sorteoFilter = () => (isUuid(f.sorteoId) ? `AND e.sorteo_id = ${p(f.sorteoId)}::uuid` : "");
+  const haySorteo = f.sorteoIds.length > 0;
+  const sorteoFilter = () => (haySorteo ? `AND e.sorteo_id = ANY(${p(f.sorteoIds)}::uuid[])` : "");
 
   const interactuaron = `
     SELECT ${NAT("ct.phone_number")} AS nat, MAX(NULLIF(trim(ct.name), '')) AS nombre,
@@ -172,11 +188,13 @@ function buildQuery(schema: string, empresaId: string, f: AudienceFilters, limit
      WHERE m.empresa_id = $1::uuid AND m.from_me = false AND ${inRange("m.created_at")}
      GROUP BY 1`;
 
-  const usaBoletas = KINDS_CON_BOLETAS.includes(f.kind);
-  const havingParts: string[] = [];
-  if (usaBoletas && f.boletasMin != null) havingParts.push(`SUM(e.cantidad_boletos) >= ${p(f.boletasMin)}::int`);
-  if (usaBoletas && f.boletasMax != null) havingParts.push(`SUM(e.cantidad_boletos) <= ${p(f.boletasMax)}::int`);
-  const having = havingParts.length ? `HAVING ${havingParts.join(" AND ")}` : "";
+  /** Filtro de boletas (suma por persona). Se arma por consulta para no dejar parámetros sin usar. */
+  const having = () => {
+    const parts: string[] = [];
+    if (f.boletasMin != null) parts.push(`SUM(e.cantidad_boletos) >= ${p(f.boletasMin)}::int`);
+    if (f.boletasMax != null) parts.push(`SUM(e.cantidad_boletos) <= ${p(f.boletasMax)}::int`);
+    return parts.length ? `HAVING ${parts.join(" AND ")}` : "";
+  };
 
   /** Compras agrupadas por persona. `filtro` reemplaza al de período + sorteo cuando hace falta otro criterio. */
   const entradas = (estados: string, fechaCol: string, filtro = `AND ${inRange(fechaCol)} ${sorteoFilter()}`) => `
@@ -185,7 +203,7 @@ function buildQuery(schema: string, empresaId: string, f: AudienceFilters, limit
            SUM(e.cantidad_boletos)::text || ' boleta(s) · Gs ' || replace(to_char(SUM(e.monto_total), 'FM999,999,999'), ',', '.') AS detalle
       FROM ${t("sorteo_entradas")} e
      WHERE e.empresa_id = $1::uuid AND e.estado_pago IN ${estados} ${filtro}
-     GROUP BY 1 ${having}`;
+     GROUP BY 1 ${having()}`;
 
   /** Saca de `inner` a quienes compraron (en el sorteo elegido, o si no hay sorteo, dentro del período). */
   const sinCompra = (inner: string, sorteoSql: string, ventanaSql: string) => {
@@ -202,76 +220,94 @@ function buildQuery(schema: string, empresaId: string, f: AudienceFilters, limit
          WHERE comp.nat IS NULL`;
   };
 
-  let base: string;
-  switch (f.kind) {
-    case "interactuaron":
-      base = interactuaron;
-      break;
-    case "compraron":
-      base = entradas("('confirmado')", "COALESCE(e.fecha_pago, e.created_at)");
-      break;
-    case "comprobante_pendiente":
-      base = entradas("('pendiente_revision')", "e.created_at");
-      break;
-    case "compraron_otro_sorteo": {
-      // Compraron (confirmado o comprobante enviado) en el sorteo anterior, en cualquier fecha…
-      const anterior = entradas(
-        "('confirmado','pendiente_revision')",
-        "COALESCE(e.fecha_pago, e.created_at)",
-        `AND e.sorteo_id = ${p(f.sorteoAnteriorId)}::uuid`
-      );
-      // …y no compraron nunca en el sorteo elegido.
-      base = sinCompra(anterior, sorteoFilter(), "");
-      break;
+  // Sin sorteo elegido, "no compró" se mira dentro del período.
+  const ventanaSinSorteo = () => (haySorteo ? "" : `AND ${inRange("COALESCE(e.fecha_pago, e.created_at)")}`);
+
+  const baseDe = (kind: AudienceKind): string => {
+    let base = "";
+    switch (kind) {
+      case "interactuaron":
+        base = interactuaron;
+        break;
+      case "compraron":
+        base = entradas("('confirmado')", "COALESCE(e.fecha_pago, e.created_at)");
+        break;
+      case "comprobante_pendiente":
+        base = entradas("('pendiente_revision')", "e.created_at");
+        break;
+      case "compraron_otro_sorteo": {
+        // Compraron (confirmado o comprobante enviado) en el sorteo anterior, en cualquier fecha…
+        const anterior = entradas(
+          "('confirmado','pendiente_revision')",
+          "COALESCE(e.fecha_pago, e.created_at)",
+          `AND e.sorteo_id = ANY(${p(f.sorteoAnteriorIds)}::uuid[])`
+        );
+        // …y no compraron nunca en el sorteo elegido.
+        base = sinCompra(anterior, sorteoFilter(), "");
+        break;
+      }
+      case "abandonaron": {
+        // Tocaron un combo (opción con cantidad) en el período y no terminaron de comprar.
+        const eligieron = `
+          SELECT ${NAT("ct.phone_number")} AS nat, MAX(NULLIF(trim(ct.name), '')) AS nombre,
+                 MAX(ev.created_at) AS ultimo,
+                 'Eligió ' || (array_agg(o.label ORDER BY ev.created_at DESC))[1] AS detalle
+            FROM ${t("chat_flow_events")} ev
+            JOIN ${t("chat_flow_options")} o ON o.id = ev.selected_option_id
+            JOIN ${t("chat_conversations")} cv ON cv.id = ev.conversation_id
+            JOIN ${t("chat_contacts")} ct ON ct.id = cv.contact_id
+           WHERE ev.empresa_id = $1::uuid AND ev.event_type = 'button_selected'
+             AND o.option_payload ? 'cantidad' AND ${inRange("ev.created_at")}
+           GROUP BY 1`;
+        base = sinCompra(eligieron, sorteoFilter(), ventanaSinSorteo());
+        break;
+      }
+      case "no_compraron":
+        // Con sorteo elegido: no compró en ese sorteo (en cualquier fecha). Sin sorteo: no compró dentro del período.
+        base = sinCompra(interactuaron, sorteoFilter(), ventanaSinSorteo());
+        break;
+      case "tocaron_boton":
+        base = `
+          SELECT ${NAT("ct.phone_number")} AS nat, MAX(NULLIF(trim(ct.name), '')) AS nombre,
+                 MAX(ev.created_at) AS ultimo, NULL::text AS detalle
+            FROM ${t("chat_campaign_events")} ev
+            JOIN ${t("chat_contacts")} ct ON ct.id = (ev.event_payload_json->>'contact_id')::uuid
+           WHERE ev.empresa_id = $1::uuid AND ev.campaign_id = ${p(f.campaignId)}::uuid
+             AND ev.event_type = 'campaign_button_action_executed' AND ${inRange("ev.created_at")}
+           GROUP BY 1`;
+        break;
+      case "respondieron_campana":
+        base = `
+          SELECT ${NAT("r.phone_e164")} AS nat, MAX(NULLIF(trim(r.row_payload_json->>'nombre'), '')) AS nombre,
+                 MAX(r.first_reply_at) AS ultimo, NULL::text AS detalle
+            FROM ${t("chat_campaign_recipients")} r
+           WHERE r.empresa_id = $1::uuid AND r.campaign_id = ${p(f.campaignId)}::uuid
+             AND r.first_reply_at IS NOT NULL AND ${inRange("r.first_reply_at")}
+           GROUP BY 1`;
+        break;
     }
-    case "abandonaron": {
-      // Tocaron un combo (opción con cantidad) en el período y no terminaron de comprar.
-      const eligieron = `
-        SELECT ${NAT("ct.phone_number")} AS nat, MAX(NULLIF(trim(ct.name), '')) AS nombre,
-               MAX(ev.created_at) AS ultimo,
-               'Eligió ' || (array_agg(o.label ORDER BY ev.created_at DESC))[1] AS detalle
-          FROM ${t("chat_flow_events")} ev
-          JOIN ${t("chat_flow_options")} o ON o.id = ev.selected_option_id
-          JOIN ${t("chat_conversations")} cv ON cv.id = ev.conversation_id
-          JOIN ${t("chat_contacts")} ct ON ct.id = cv.contact_id
-         WHERE ev.empresa_id = $1::uuid AND ev.event_type = 'button_selected'
-           AND o.option_payload ? 'cantidad' AND ${inRange("ev.created_at")}
-         GROUP BY 1`;
-      base = sinCompra(
-        eligieron,
-        sorteoFilter(),
-        isUuid(f.sorteoId) ? "" : `AND ${inRange("COALESCE(e.fecha_pago, e.created_at)")}`
-      );
-      break;
-    }
-    case "no_compraron":
-      // Con sorteo elegido: no compró en ese sorteo (en cualquier fecha). Sin sorteo: no compró dentro del período.
-      base = sinCompra(
-        interactuaron,
-        sorteoFilter(),
-        isUuid(f.sorteoId) ? "" : `AND ${inRange("COALESCE(e.fecha_pago, e.created_at)")}`
-      );
-      break;
-    case "tocaron_boton":
-      base = `
-        SELECT ${NAT("ct.phone_number")} AS nat, MAX(NULLIF(trim(ct.name), '')) AS nombre,
-               MAX(ev.created_at) AS ultimo, NULL::text AS detalle
-          FROM ${t("chat_campaign_events")} ev
-          JOIN ${t("chat_contacts")} ct ON ct.id = (ev.event_payload_json->>'contact_id')::uuid
-         WHERE ev.empresa_id = $1::uuid AND ev.campaign_id = ${p(f.campaignId)}::uuid
-           AND ev.event_type = 'campaign_button_action_executed' AND ${inRange("ev.created_at")}
-         GROUP BY 1`;
-      break;
-    case "respondieron_campana":
-      base = `
-        SELECT ${NAT("r.phone_e164")} AS nat, MAX(NULLIF(trim(r.row_payload_json->>'nombre'), '')) AS nombre,
-               MAX(r.first_reply_at) AS ultimo, NULL::text AS detalle
-          FROM ${t("chat_campaign_recipients")} r
-         WHERE r.empresa_id = $1::uuid AND r.campaign_id = ${p(f.campaignId)}::uuid
-           AND r.first_reply_at IS NOT NULL AND ${inRange("r.first_reply_at")}
-         GROUP BY 1`;
-      break;
+    return base;
+  };
+
+  /**
+   * Compraron + comprobante pendiente juntos van en UNA consulta de compras: así el filtro de boletas
+   * suma las aprobadas y las pendientes de la misma persona. (Para pendientes `fecha_pago` es null,
+   * así que `COALESCE(fecha_pago, created_at)` es la misma fecha que usa ese tipo solo.)
+   */
+  let kinds = [...new Set(f.kinds)];
+  const bases: string[] = [];
+  if (kinds.includes("compraron") && kinds.includes("comprobante_pendiente")) {
+    bases.push(entradas("('confirmado','pendiente_revision')", "COALESCE(e.fecha_pago, e.created_at)"));
+    kinds = kinds.filter((k) => k !== "compraron" && k !== "comprobante_pendiente");
   }
+  for (const k of kinds) bases.push(baseDe(k));
+  const base =
+    bases.length === 1
+      ? bases[0]
+      : `SELECT u.nat, MAX(u.nombre) AS nombre, MAX(u.ultimo) AS ultimo,
+                string_agg(DISTINCT u.detalle, ' · ') AS detalle
+           FROM (${bases.map((b) => `(${b})`).join("\n UNION ALL \n")}) u
+          GROUP BY u.nat`;
 
   const excl = (f.excluirTelefonos ?? []).map(normalizeNat).filter((x) => x.length >= 6);
   const exclSql = excl.length ? `AND b.nat <> ALL(${p(excl)}::text[])` : "";
