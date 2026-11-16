@@ -57,6 +57,58 @@ function fmtFecha(s: string | null): string {
   return s || "—";
 }
 
+const HORAS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+const MINUTOS = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0")).concat("59");
+
+/**
+ * Hora como dos desplegables (hora y minutos). El `<input type="time">` del navegador se completaba
+ * con los minutos de la hora actual al elegir solo la hora (ej. 10 → 10:15) sin que se notara.
+ * `value` es "HH:MM" o "" (sin hora).
+ */
+function HoraSelect({
+  label,
+  value,
+  minutoDefecto,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  minutoDefecto: string;
+  onChange: (v: string) => void;
+}) {
+  const [h, m] = value ? value.split(":") : ["", minutoDefecto];
+  const sel =
+    "rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-800 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20";
+  return (
+    <label className="space-y-1">
+      <span className="block text-[11px] text-slate-500">{label}</span>
+      <span className="flex items-center gap-1">
+        <select className={sel} value={h} onChange={(e) => onChange(e.target.value ? `${e.target.value}:${m}` : "")}>
+          <option value="">--</option>
+          {HORAS.map((x) => (
+            <option key={x} value={x}>
+              {x}
+            </option>
+          ))}
+        </select>
+        <span className="text-sm text-slate-500">:</span>
+        <select
+          className={sel}
+          value={m}
+          disabled={!h}
+          onChange={(e) => onChange(h ? `${h}:${e.target.value}` : "")}
+        >
+          {MINUTOS.map((x) => (
+            <option key={x} value={x}>
+              {x}
+            </option>
+          ))}
+        </select>
+      </span>
+    </label>
+  );
+}
+
 /** Selección múltiple de sorteos como fichas (tocar = sumar/sacar). */
 function SorteoChips({
   sorteos,
@@ -345,24 +397,8 @@ export default function AudienciasClient() {
             {periodConHora(period) && (
               <div className="space-y-1">
                 <div className="flex max-w-md flex-wrap items-end gap-2">
-                  <label className="space-y-1">
-                    <span className="text-[11px] text-slate-500">Desde la hora (opcional)</span>
-                    <input
-                      type="time"
-                      className={`${inputCls} w-36`}
-                      value={horaDesde}
-                      onChange={(e) => setHoraDesde(e.target.value)}
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-[11px] text-slate-500">Hasta la hora (opcional)</span>
-                    <input
-                      type="time"
-                      className={`${inputCls} w-36`}
-                      value={horaHasta}
-                      onChange={(e) => setHoraHasta(e.target.value)}
-                    />
-                  </label>
+                  <HoraSelect label="Desde la hora (opcional)" value={horaDesde} minutoDefecto="00" onChange={setHoraDesde} />
+                  <HoraSelect label="Hasta la hora (opcional)" value={horaHasta} minutoDefecto="59" onChange={setHoraHasta} />
                   {(horaDesde || horaHasta) && (
                     <button
                       type="button"
@@ -377,7 +413,7 @@ export default function AudienciasClient() {
                   )}
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  Ej: Ayer de 18:00 a 23:59. Con varios días, la hora de inicio vale para el primer día y la de fin
+                  Ej: Ayer de 18:00 a 23:59. La hora de fin incluye ese minuto. Con varios días, la hora de inicio vale para el primer día y la de fin
                   para el último. Vacío = el día completo.
                 </p>
               </div>
