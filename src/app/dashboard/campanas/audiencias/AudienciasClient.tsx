@@ -54,20 +54,52 @@ function fmtFecha(s: string | null): string {
   return s || "—";
 }
 
+/** Selección múltiple de sorteos como fichas (tocar = sumar/sacar). */
+function SorteoChips({
+  sorteos,
+  value,
+  onChange,
+}: {
+  sorteos: Sorteo[];
+  value: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {sorteos.map((s) => {
+        const on = value.includes(s.id);
+        return (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onChange(on ? value.filter((x) => x !== s.id) : [...value, s.id])}
+            className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+              on ? "border-[#4FAEB2] bg-[#4FAEB2] text-white" : "border-slate-300 bg-white text-slate-700 hover:border-[#4FAEB2]"
+            }`}
+          >
+            {on ? "✓ " : ""}
+            {s.nombre} {s.estado === "activo" ? "(activo)" : `(${s.estado})`}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function AudienciasClient() {
   const [sorteos, setSorteos] = useState<Sorteo[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
 
-  const [kind, setKind] = useState<Kind>("no_compraron");
+  const [kinds, setKinds] = useState<Kind[]>(["no_compraron"]);
   const [period, setPeriod] = useState<Period>("sorteo_actual");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
-  const [sorteoId, setSorteoId] = useState("");
+  const [sorteoIds, setSorteoIds] = useState<string[]>([]);
   const [campaignId, setCampaignId] = useState("");
   const [excluirPendientes, setExcluirPendientes] = useState(true);
   const [excluir, setExcluir] = useState("");
   const [agregar, setAgregar] = useState("");
-  const [sorteoAnteriorId, setSorteoAnteriorId] = useState("");
+  const [sorteoAnteriorIds, setSorteoAnteriorIds] = useState<string[]>([]);
   const [boletasMin, setBoletasMin] = useState("");
   const [boletasMax, setBoletasMax] = useState("");
   const [excluirHoras, setExcluirHoras] = useState("");
@@ -88,39 +120,48 @@ export default function AudienciasClient() {
       setSorteos(j.data.sorteos ?? []);
       setCampaigns(j.data.campaigns ?? []);
       const activo = (j.data.sorteos ?? []).find((s: Sorteo) => s.estado === "activo") ?? j.data.sorteos?.[0];
-      if (activo) setSorteoId(activo.id);
+      if (activo) setSorteoIds([activo.id]);
       const anterior = (j.data.sorteos ?? []).find((s: Sorteo) => s.id !== activo?.id);
-      if (anterior) setSorteoAnteriorId(anterior.id);
+      if (anterior) setSorteoAnteriorIds([anterior.id]);
       if (j.data.campaigns?.[0]) setCampaignId(j.data.campaigns[0].id);
     })();
   }, []);
 
+  const algun = (fn: (k: Kind) => boolean) => kinds.some(fn);
+  const conOtroSorteo = kinds.includes("compraron_otro_sorteo");
+  const conPeriodo = algun(usesPeriod);
+  const conSorteo = algun(usesSorteo) || (conPeriodo && period === "sorteo_actual");
+
+  function toggleKind(k: Kind) {
+    setKinds((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
+  }
+
   const filters = useMemo(
     () => ({
-      kind,
+      kinds,
       period,
       desde: period === "personalizado" ? desde : null,
       hasta: period === "personalizado" ? hasta : null,
-      sorteo_id:
-        usesSorteo(kind) || kind === "compraron_otro_sorteo" || (usesPeriod(kind) && period === "sorteo_actual")
-          ? sorteoId
-          : null,
-      sorteo_anterior_id: kind === "compraron_otro_sorteo" ? sorteoAnteriorId : null,
-      campaign_id: usesCampaign(kind) ? campaignId : null,
+      sorteo_ids:
+        kinds.some(usesSorteo) || kinds.includes("compraron_otro_sorteo") || period === "sorteo_actual"
+          ? sorteoIds
+          : [],
+      sorteo_anterior_ids: kinds.includes("compraron_otro_sorteo") ? sorteoAnteriorIds : [],
+      campaign_id: kinds.some(usesCampaign) ? campaignId : null,
       excluir_pendientes: excluirPendientes,
       excluir_telefonos: excluir,
       agregar_telefonos: agregar,
-      boletas_min: usesBoletas(kind) ? boletasMin.trim() : "",
-      boletas_max: usesBoletas(kind) ? boletasMax.trim() : "",
+      boletas_min: kinds.some(usesBoletas) ? boletasMin.trim() : "",
+      boletas_max: kinds.some(usesBoletas) ? boletasMax.trim() : "",
       excluir_campana_horas: excluirHoras.trim(),
     }),
     [
-      kind,
+      kinds,
       period,
       desde,
       hasta,
-      sorteoId,
-      sorteoAnteriorId,
+      sorteoIds,
+      sorteoAnteriorIds,
       campaignId,
       excluirPendientes,
       excluir,
@@ -177,7 +218,7 @@ export default function AudienciasClient() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `audiencia_${kind}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.download = `audiencia_${kinds.join("+")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -195,7 +236,7 @@ export default function AudienciasClient() {
     try {
       const blob = await fetchExcel();
       const fd = new FormData();
-      fd.append("file", new File([blob], `audiencia_${kind}.xlsx`, { type: blob.type }));
+      fd.append("file", new File([blob], `audiencia_${kinds.join("+")}.xlsx`, { type: blob.type }));
       fd.append("phone_column", "telefono");
       const r = await apiFetch(`/api/campanas/${targetCampaign}/import`, { method: "POST", body: fd });
       const j = await r.json();
@@ -229,111 +270,102 @@ export default function AudienciasClient() {
       <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="space-y-2">
           <p className="text-xs font-semibold text-slate-600">1. ¿A quiénes?</p>
+          <p className="text-[11px] text-slate-500">
+            Podés marcar varios: la lista es la suma de todos, sin repetir personas. Ej: Compraron + Comprobante pendiente.
+          </p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {KINDS.map((o) => (
-              <button
-                key={o.k}
-                type="button"
-                onClick={() => setKind(o.k)}
-                className={`flex items-start gap-3 rounded-xl border-2 p-3 text-left transition-colors ${
-                  kind === o.k ? "border-[#4FAEB2] bg-[#4FAEB2]/10" : "border-slate-200 hover:border-[#4FAEB2]/60"
-                }`}
-              >
-                <span className="text-xl leading-none">{o.icon}</span>
-                <span>
-                  <span className="block text-sm font-semibold text-slate-800">{o.title}</span>
-                  <span className="block text-[11px] text-slate-500">{o.desc}</span>
-                </span>
-              </button>
-            ))}
+            {KINDS.map((o) => {
+              const on = kinds.includes(o.k);
+              return (
+                <button
+                  key={o.k}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => toggleKind(o.k)}
+                  className={`flex items-start gap-3 rounded-xl border-2 p-3 text-left transition-colors ${
+                    on ? "border-[#4FAEB2] bg-[#4FAEB2]/10" : "border-slate-200 hover:border-[#4FAEB2]/60"
+                  }`}
+                >
+                  <span className="text-xl leading-none">{o.icon}</span>
+                  <span className="flex-1">
+                    <span className="block text-sm font-semibold text-slate-800">{o.title}</span>
+                    <span className="block text-[11px] text-slate-500">{o.desc}</span>
+                  </span>
+                  <span
+                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] font-bold ${
+                      on ? "border-[#4FAEB2] bg-[#4FAEB2] text-white" : "border-slate-300 bg-white"
+                    }`}
+                  >
+                    {on ? "✓" : ""}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {usesPeriod(kind) ? (
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-slate-600">2. ¿Cuándo?</p>
-          <div className="flex flex-wrap gap-2">
-            {PERIODS.map((o) => (
-              <button
-                key={o.p}
-                type="button"
-                onClick={() => setPeriod(o.p)}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
-                  period === o.p ? "border-[#4FAEB2] bg-[#4FAEB2] text-white" : "border-slate-300 bg-white text-slate-700 hover:border-[#4FAEB2]"
-                }`}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-          {period === "personalizado" && (
-            <div className="grid max-w-md grid-cols-2 gap-2">
-              <label className="space-y-1">
-                <span className="text-[11px] text-slate-500">Desde</span>
-                <input type="date" className={inputCls} value={desde} onChange={(e) => setDesde(e.target.value)} />
-              </label>
-              <label className="space-y-1">
-                <span className="text-[11px] text-slate-500">Hasta</span>
-                <input type="date" className={inputCls} value={hasta} onChange={(e) => setHasta(e.target.value)} />
-              </label>
-            </div>
-          )}
-          <p className="text-[11px] text-slate-500">
-            {kind === "no_compraron"
-              ? "El período es cuándo escribieron. La compra se mira en el sorteo elegido."
-              : kind === "abandonaron"
-                ? "El período es cuándo eligieron el combo. La compra se mira en el sorteo elegido."
-                : usesCampaign(kind)
-                  ? "El período es cuándo tocaron el botón o respondieron."
-                  : kind === "interactuaron"
-                    ? "El período es cuándo escribieron."
-                    : "El período es cuándo compraron o mandaron el comprobante."}{" "}
-            Horario de Paraguay.
-          </p>
-        </div>
-        ) : (
+        {conPeriodo && (
           <div className="space-y-2">
-            <p className="text-xs font-semibold text-slate-600">2. ¿Qué sorteos?</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1">
-                <span className="text-xs font-semibold text-slate-600">Compraron en</span>
-                <select className={inputCls} value={sorteoAnteriorId} onChange={(e) => setSorteoAnteriorId(e.target.value)}>
-                  {sorteos.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nombre} {s.estado === "activo" ? "(activo)" : `(${s.estado})`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs font-semibold text-slate-600">Y todavía no compraron en</span>
-                <select className={inputCls} value={sorteoId} onChange={(e) => setSorteoId(e.target.value)}>
-                  {sorteos.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nombre} {s.estado === "activo" ? "(activo)" : `(${s.estado})`}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <p className="text-xs font-semibold text-slate-600">2. ¿Cuándo?</p>
+            <div className="flex flex-wrap gap-2">
+              {PERIODS.map((o) => (
+                <button
+                  key={o.p}
+                  type="button"
+                  onClick={() => setPeriod(o.p)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                    period === o.p ? "border-[#4FAEB2] bg-[#4FAEB2] text-white" : "border-slate-300 bg-white text-slate-700 hover:border-[#4FAEB2]"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {period === "personalizado" && (
+              <div className="grid max-w-md grid-cols-2 gap-2">
+                <label className="space-y-1">
+                  <span className="text-[11px] text-slate-500">Desde</span>
+                  <input type="date" className={inputCls} value={desde} onChange={(e) => setDesde(e.target.value)} />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] text-slate-500">Hasta</span>
+                  <input type="date" className={inputCls} value={hasta} onChange={(e) => setHasta(e.target.value)} />
+                </label>
+              </div>
+            )}
+            <p className="text-[11px] text-slate-500">
+              El período es cuándo hicieron lo elegido: escribir, comprar, mandar el comprobante, elegir el combo o tocar el
+              botón. En &quot;no compraron&quot; la compra se mira en los sorteos elegidos. Horario de Paraguay.
+            </p>
+          </div>
+        )}
+
+        {conOtroSorteo && (
+          <div className="space-y-3">
+            <p className="text-xs font-semibold text-slate-600">
+              {conPeriodo ? "3." : "2."} Compraron en otro sorteo y no en este
+            </p>
+            <div className="space-y-1">
+              <span className="text-xs font-semibold text-slate-600">Compraron en (uno o varios)</span>
+              <SorteoChips sorteos={sorteos} value={sorteoAnteriorIds} onChange={setSorteoAnteriorIds} />
+            </div>
+            <div className="space-y-1">
+              <span className="text-xs font-semibold text-slate-600">Y todavía no compraron en (uno o varios)</span>
+              <SorteoChips sorteos={sorteos} value={sorteoIds} onChange={setSorteoIds} />
             </div>
             <p className="text-[11px] text-slate-500">Se miran los sorteos completos, sin importar la fecha.</p>
           </div>
         )}
 
+        {conSorteo && !conOtroSorteo && (
+          <div className="space-y-1">
+            <span className="text-xs font-semibold text-slate-600">Sorteos (uno o varios)</span>
+            <SorteoChips sorteos={sorteos} value={sorteoIds} onChange={setSorteoIds} />
+          </div>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-2">
-          {(usesSorteo(kind) || (usesPeriod(kind) && period === "sorteo_actual")) && (
-            <label className="space-y-1">
-              <span className="text-xs font-semibold text-slate-600">Sorteo</span>
-              <select className={inputCls} value={sorteoId} onChange={(e) => setSorteoId(e.target.value)}>
-                {sorteos.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nombre} {s.estado === "activo" ? "(activo)" : `(${s.estado})`}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {usesCampaign(kind) && (
+          {algun(usesCampaign) && (
             <label className="space-y-1">
               <span className="text-xs font-semibold text-slate-600">Campaña</span>
               <select className={inputCls} value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
@@ -345,13 +377,13 @@ export default function AudienciasClient() {
               </select>
             </label>
           )}
-          {usesPendientesToggle(kind) && (
+          {algun(usesPendientesToggle) && (
             <label className="flex items-center gap-2 self-end pb-2 text-xs text-slate-700">
               <input type="checkbox" checked={excluirPendientes} onChange={(e) => setExcluirPendientes(e.target.checked)} />
               No incluir a los que mandaron comprobante (ya pagaron)
             </label>
           )}
-          {usesBoletas(kind) && (
+          {algun(usesBoletas) && (
             <div className="space-y-1">
               <span className="text-xs font-semibold text-slate-600">Boletas compradas (opcional)</span>
               <div className="grid grid-cols-2 gap-2">

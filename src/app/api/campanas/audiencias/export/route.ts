@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const { rows } = await runAudience(auth.empresaId, filters, 15000);
-    const label = AUDIENCE_LABEL[filters.kind];
+    const label = filters.kinds.map((k) => AUDIENCE_LABEL[k]).join(" + ");
     const sheetRows = rows.map((r) => ({
       nombre: r.nombre,
       telefono: r.telefono,
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     return new NextResponse(new Uint8Array(buf), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="audiencia_${filters.kind}.xlsx"`,
+        "Content-Disposition": `attachment; filename="audiencia_${filters.kinds.join("+")}.xlsx"`,
         "X-Audience-Count": String(rows.length),
       },
     });
