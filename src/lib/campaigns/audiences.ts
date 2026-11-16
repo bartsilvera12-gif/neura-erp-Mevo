@@ -23,12 +23,19 @@ export type AudienceKind = (typeof AUDIENCE_KINDS)[number];
 export const PERIOD_PRESETS = ["hoy", "ayer", "ultimos_7", "ultimos_30", "sorteo_actual", "todo", "personalizado"] as const;
 export type PeriodPreset = (typeof PERIOD_PRESETS)[number];
 
+/** Períodos por días: aceptan hora de inicio (primer día) y hora de fin (último día). */
+export const PERIODS_CON_HORA: readonly PeriodPreset[] = ["hoy", "ayer", "ultimos_7", "ultimos_30", "personalizado"];
+
 export type AudienceFilters = {
   /** Uno o más tipos: la audiencia es la suma (sin repetir personas). */
   kinds: AudienceKind[];
   period: PeriodPreset;
   desde?: string | null;
   hasta?: string | null;
+  /** "HH:MM" opcional: hora de inicio del primer día del período. */
+  horaDesde?: string | null;
+  /** "HH:MM" opcional: hora de fin (incluida) del último día del período. */
+  horaHasta?: string | null;
   /** Uno o más sorteos (vacío = sin filtro de sorteo). */
   sorteoIds: string[];
   campaignId?: string | null;
@@ -63,6 +70,14 @@ function isUuid(s: string | null | undefined): s is string {
 function isDate(s: string | null | undefined): s is string {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
+/** "HH:MM" → minutos desde 00:00, o null si no es una hora válida. */
+function minutosDeHora(s: string | null | undefined): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((s ?? "").trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  return h <= 23 && min <= 59 ? h * 60 + min : null;
+}
 
 export function normalizeNat(raw: string): string {
   return raw.replace(/\D/g, "").replace(/^595/, "").replace(/^0+/, "");
@@ -79,6 +94,8 @@ export function parseAudienceFilters(body: Record<string, unknown>): AudienceFil
     period: s(body.period) as PeriodPreset,
     desde: s(body.desde) || null,
     hasta: s(body.hasta) || null,
+    horaDesde: s(body.hora_desde) || null,
+    horaHasta: s(body.hora_hasta) || null,
     sorteoIds: list(body.sorteo_ids, body.sorteo_id),
     campaignId: s(body.campaign_id) || null,
     excluirPendientes: body.excluir_pendientes !== false,
@@ -118,6 +135,14 @@ export function validateAudienceFilters(f: AudienceFilters): string | null {
     if (f.period === "personalizado" && (!isDate(f.desde) || !isDate(f.hasta))) return "Completá las fechas desde y hasta.";
     if (f.period === "personalizado" && f.desde! > f.hasta!) return "La fecha desde no puede ser posterior a la fecha hasta.";
     if (f.period === "sorteo_actual" && f.sorteoIds.length === 0) return "Elegí al menos un sorteo.";
+    if (f.horaDesde && minutosDeHora(f.horaDesde) == null) return "La hora de inicio no es válida (HH:MM).";
+    if (f.horaHasta && minutosDeHora(f.horaHasta) == null) return "La hora de fin no es válida (HH:MM).";
+    const unSoloDia =
+      f.period === "hoy" || f.period === "ayer" || (f.period === "personalizado" && f.desde === f.hasta);
+    const md = minutosDeHora(f.horaDesde);
+    const mh = minutosDeHora(f.horaHasta);
+    if (unSoloDia && md != null && mh != null && md > mh)
+      return "En un solo día, la hora de inicio no puede ser posterior a la de fin.";
   }
   if (f.kinds.some((k) => k === "tocaron_boton" || k === "respondieron_campana") && !isUuid(f.campaignId))
     return "Elegí la campaña.";
@@ -148,28 +173,43 @@ function buildQuery(schema: string, empresaId: string, f: AudienceFilters, limit
   const dayStart = `(date_trunc('day', now() AT TIME ZONE '${TZ}') AT TIME ZONE '${TZ}')`;
   let desde = "'-infinity'::timestamptz";
   let hasta = "'infinity'::timestamptz";
+  /** Inicio (00:00 Paraguay) del primer y del último día, para los períodos por días. */
+  let primerDia: string | null = null;
+  let ultimoDia: string | null = null;
   switch (f.period) {
     case "hoy":
-      desde = dayStart;
+      primerDia = dayStart;
+      ultimoDia = dayStart;
       break;
     case "ayer":
-      desde = `(${dayStart} - interval '1 day')`;
-      hasta = dayStart;
+      primerDia = `(${dayStart} - interval '1 day')`;
+      ultimoDia = primerDia;
       break;
     case "ultimos_7":
-      desde = `(${dayStart} - interval '6 days')`;
+      primerDia = `(${dayStart} - interval '6 days')`;
+      ultimoDia = dayStart;
       break;
     case "ultimos_30":
-      desde = `(${dayStart} - interval '29 days')`;
+      primerDia = `(${dayStart} - interval '29 days')`;
+      ultimoDia = dayStart;
       break;
     case "sorteo_actual":
       // Con varios sorteos: desde que empezó el más viejo de los elegidos.
       desde = `(SELECT MIN(created_at) FROM ${t("sorteos")} WHERE id = ANY(${p(f.sorteoIds)}::uuid[]))`;
       break;
     case "personalizado":
-      desde = `(${p(f.desde)}::date::timestamp AT TIME ZONE '${TZ}')`;
-      hasta = `((${p(f.hasta)}::date + 1)::timestamp AT TIME ZONE '${TZ}')`;
+      primerDia = `(${p(f.desde)}::date::timestamp AT TIME ZONE '${TZ}')`;
+      ultimoDia = `(${p(f.hasta)}::date::timestamp AT TIME ZONE '${TZ}')`;
       break;
+  }
+  if (primerDia && ultimoDia) {
+    // Sin horas: día completo (00:00 del primero a 00:00 del día siguiente al último).
+    // Con horas: la de inicio corre el comienzo del primer día; la de fin (incluido ese minuto) el final del último.
+    const md = minutosDeHora(f.horaDesde);
+    const mh = minutosDeHora(f.horaHasta);
+    desde = md != null ? `(${primerDia} + make_interval(mins => ${p(md)}::int))` : primerDia;
+    hasta =
+      mh != null ? `(${ultimoDia} + make_interval(mins => ${p(mh + 1)}::int))` : `(${ultimoDia} + interval '1 day')`;
   }
   const inRange = (col: string) => `${col} >= (SELECT desde FROM rango) AND ${col} < (SELECT hasta FROM rango)`;
   /**

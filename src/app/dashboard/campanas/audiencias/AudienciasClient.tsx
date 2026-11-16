@@ -46,6 +46,9 @@ const usesPendientesToggle = (k: Kind) => k === "no_compraron" || k === "abandon
 /** Este tipo mira sorteos completos: el período no se usa. */
 const usesPeriod = (k: Kind) => k !== "compraron_otro_sorteo";
 const usesCampaign = (k: Kind) => k === "tocaron_boton" || k === "respondieron_campana";
+/** Períodos por días: se les puede poner hora de inicio y de fin. */
+const periodConHora = (p: Period) =>
+  p === "hoy" || p === "ayer" || p === "ultimos_7" || p === "ultimos_30" || p === "personalizado";
 
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-[#4FAEB2] focus:outline-none focus:ring-2 focus:ring-[#4FAEB2]/20";
@@ -94,6 +97,8 @@ export default function AudienciasClient() {
   const [period, setPeriod] = useState<Period>("sorteo_actual");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
+  const [horaDesde, setHoraDesde] = useState("");
+  const [horaHasta, setHoraHasta] = useState("");
   const [sorteoIds, setSorteoIds] = useState<string[]>([]);
   const [campaignId, setCampaignId] = useState("");
   const [excluirPendientes, setExcluirPendientes] = useState(true);
@@ -142,6 +147,8 @@ export default function AudienciasClient() {
       period,
       desde: period === "personalizado" ? desde : null,
       hasta: period === "personalizado" ? hasta : null,
+      hora_desde: periodConHora(period) ? horaDesde : "",
+      hora_hasta: periodConHora(period) ? horaHasta : "",
       sorteo_ids:
         kinds.some(usesSorteo) || kinds.includes("compraron_otro_sorteo") || period === "sorteo_actual"
           ? sorteoIds
@@ -160,6 +167,8 @@ export default function AudienciasClient() {
       period,
       desde,
       hasta,
+      horaDesde,
+      horaHasta,
       sorteoIds,
       sorteoAnteriorIds,
       campaignId,
@@ -331,6 +340,46 @@ export default function AudienciasClient() {
                   <span className="text-[11px] text-slate-500">Hasta</span>
                   <input type="date" className={inputCls} value={hasta} onChange={(e) => setHasta(e.target.value)} />
                 </label>
+              </div>
+            )}
+            {periodConHora(period) && (
+              <div className="space-y-1">
+                <div className="flex max-w-md flex-wrap items-end gap-2">
+                  <label className="space-y-1">
+                    <span className="text-[11px] text-slate-500">Desde la hora (opcional)</span>
+                    <input
+                      type="time"
+                      className={`${inputCls} w-36`}
+                      value={horaDesde}
+                      onChange={(e) => setHoraDesde(e.target.value)}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[11px] text-slate-500">Hasta la hora (opcional)</span>
+                    <input
+                      type="time"
+                      className={`${inputCls} w-36`}
+                      value={horaHasta}
+                      onChange={(e) => setHoraHasta(e.target.value)}
+                    />
+                  </label>
+                  {(horaDesde || horaHasta) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHoraDesde("");
+                        setHoraHasta("");
+                      }}
+                      className="pb-2 text-xs font-semibold text-[#3F8E91] hover:underline"
+                    >
+                      Quitar horas
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Ej: Ayer de 18:00 a 23:59. Con varios días, la hora de inicio vale para el primer día y la de fin
+                  para el último. Vacío = el día completo.
+                </p>
               </div>
             )}
             <p className="text-[11px] text-slate-500">
